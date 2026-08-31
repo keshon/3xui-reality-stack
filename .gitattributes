@@ -1,0 +1,5 @@
+# This repo is deployed onto Linux. CRLF in a shell script is a syntax error
+# there ("/usr/bin/env: 'bash\r'"), so never let a Windows checkout introduce it.
+* text=auto eol=lf
+*.png binary
+*.svg text eol=lf
