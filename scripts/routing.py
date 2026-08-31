@@ -121,7 +121,7 @@ CHECKS = [
 ]
 
 
-def test(p, inbound_tag):
+def test(p, inbound_tag, env=None):
     def route(**kw):
         r = p.post("/panel/api/xray/routeTest", kw, as_json=False)
         obj = (r or {}).get("obj")
@@ -137,8 +137,17 @@ def test(p, inbound_tag):
             return tag or "direct*"
         return str(obj)[:60] if obj is not None else "?" + str(r.get("msg", ""))[:40]
 
+    checks = list(CHECKS)
+    # The deployment's own hostnames must never be refused. On a .ru zone the
+    # RU rules catch them, and a client inside the tunnel then loses the
+    # subscription URL, the panel and the Telegram proxy at once.
+    for key in ("PUBLIC_DOMAIN", "PANEL_DOMAIN", "TOOLS_DOMAIN", "BASE_DOMAIN"):
+        host = (env or {}).get(key)
+        if host:
+            checks.insert(0, (host, "domain", "direct"))
+
     bad = 0
-    for what, kind, want in CHECKS:
+    for what, kind, want in checks:
         got = route(**{kind: what}, port="443", network="tcp",
                     inboundTag=inbound_tag)
         ok = got == want or (want == "direct" and got == "direct*")
@@ -269,7 +278,7 @@ def main():
         if "--inbound" in sys.argv:
             tag = sys.argv[sys.argv.index("--inbound") + 1]
         print("asking Xray where it would send each destination (via %s)" % tag)
-        sys.exit(1 if test(p, tag) else 0)
+        sys.exit(1 if test(p, tag, e) else 0)
 
     backup = os.path.join(ROOT, "xray-template.backup.json")
     with open(backup, "w", newline="\n") as f:
