@@ -31,8 +31,13 @@ DB_PATH = os.path.join(ROOT, "xui", "db", "x-ui.db")
 
 
 def env_file(path=ENV_PATH):
+    """Parse .env into a dict. Missing file -> {}, so the helpers that only
+    need users.txt still run before .env exists. install.sh checks for .env
+    itself; nothing here should turn a missing file into a traceback."""
     out = {}
-    for line in open(path):
+    if not os.path.exists(path):
+        return out
+    for line in open(path, encoding="utf-8"):
         line = line.strip()
         if line and not line.startswith("#") and "=" in line:
             k, v = line.split("=", 1)
