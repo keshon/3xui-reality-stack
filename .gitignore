@@ -3,6 +3,8 @@
 users.txt
 CLIENT-CREDENTIALS.txt
 CLIENT-LINKS.txt
+handout/
+awg/
 
 # runtime data
 traefik/data/

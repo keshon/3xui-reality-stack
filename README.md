@@ -91,6 +91,11 @@ and prints one subscription URL per person.
 Hand out one subscription URL per person; it carries every lane and updates
 itself. Let the client (Happ, Hiddify, v2rayN) pick between them with `urltest`.
 
+AmneziaWG is the exception worth knowing about. It rides in the subscription as
+a `vpn://` entry, which only the Amnezia clients understand — Happ, v2rayN and
+Hiddify skip it silently, so the lane looks absent. `scripts/client-links.py`
+decodes it back into an ordinary WireGuard-style `.conf` for the AmneziaWG app.
+
 ## Layout
 
 ```
@@ -103,6 +108,7 @@ xui/                      3x-ui + Xray
 scripts/
   panel.py                3x-ui API client (all the quirks live here)
   resolve-users.py        users.txt + USERS= -> one validated list
+  client-links.py         a subscription, unpacked into per-lane entries
   provision-inbounds.py   creates the Xray lanes; --repair-hysteria
   add-mtproto.py          MTProto lane, fronting your own domain
   add-amneziawg.py        AmneziaWG v1.5 lane, obfuscation randomised per host
@@ -132,6 +138,9 @@ python3 scripts/provision-inbounds.py --repair-hysteria && docker restart 3x-ui
 #   1. add an A record for the new name
 #   2. change PUBLIC_DOMAIN in .env
 #   3. ./bootstrap.sh, then update serverNames + host in the panel
+
+# what to hand each person (writes CLIENT-LINKS.txt, mode 600)
+python3 scripts/client-links.py --write --awg-dir awg
 
 # network diagnostics
 bash scripts/triage.sh
