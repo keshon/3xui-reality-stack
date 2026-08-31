@@ -222,7 +222,12 @@ def install_happ(p, env, apply_it):
     r = p.update_settings(new)
     if not r.get("success"):
         sys.exit("subscription routing not saved: %s" % r.get("msg"))
-    print("installed on the subscription")
+    # The subscription server reads these settings once, when it is built, so
+    # saving them is not enough - without a restart the headers keep coming
+    # back missing and it looks as though nothing was written.
+    print("installed; restarting 3x-ui so the sub service picks it up")
+    subprocess.run(["docker", "restart", "3x-ui"], capture_output=True)
+    time.sleep(14)
 
 
 def check_happ_headers(env):

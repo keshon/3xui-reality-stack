@@ -70,8 +70,27 @@ The server refusing Russian destinations is only half of it — each device has
 to send them somewhere. Without a bypass rule, a Russian site simply fails to
 load while the VPN is on.
 
-**Happ, v2rayN, Hiddify** (anything on Xray core) — add these routing rules,
-routed to `direct`:
+**Happ needs nothing done in the app.** It reads a routing profile straight
+off the subscription response — 3x-ui sets `Routing-Enable: true` and
+`Routing: happ://routing/onadd/<base64 json>` headers, and Happ applies the
+profile when the subscription is added or refreshed. Install it once:
+
+```bash
+python3 scripts/routing.py --happ           # preview the profile
+python3 scripts/routing.py --happ --apply   # install and verify the headers
+```
+
+Everyone then gets it by re-adding their subscription. The profile sends
+`geosite:tld-ru`, `geosite:category-ru`, `geoip:ru` and this deployment's own
+zone to `direct`, and everything else through the tunnel. Field names and
+types are Happ's own, not Xray's — booleans are the strings `"true"`/`"false"`
+([spec](https://www.happ.su/main/dev-docs/routing)).
+
+The settings are read once when the subscription server starts, so `--apply`
+restarts the panel; without that the headers keep coming back missing.
+
+**v2rayN, Hiddify and anything else on Xray core** take the same three tokens
+by hand, routed to `direct`, above any catch-all proxy rule:
 
 ```
 geosite:tld-ru
@@ -79,9 +98,8 @@ geosite:category-ru
 geoip:ru
 ```
 
-Those three come from the standard `geosite.dat`/`geoip.dat` every such client
-already bundles, so nothing extra needs installing. Put them above any
-catch-all proxy rule.
+They come from the standard `geosite.dat`/`geoip.dat` those clients already
+bundle, so nothing extra needs installing.
 
 **AmneziaWG** is the exception. Its config carries `AllowedIPs = 0.0.0.0/0,
 ::/0`, and excluding Russia would mean expanding that into several thousand
@@ -91,6 +109,20 @@ lane, not the everyday one.
 
 **Telegram** is unaffected. MTProto runs under `mtg`, not Xray, so no routing
 rule applies to it.
+
+## Do not block your own zone
+
+`BASE_DOMAIN` here is `keshon.ru`, and `geosite:tld-ru` matches it. Left
+unhandled, the RU rules block the hostnames the whole deployment is *reached
+by*: the subscription URL, the panel, and the MTProto proxy's FakeTLS fronting
+name. A client already inside the tunnel then cannot reach the tunnel's own
+endpoints — subscription refreshes fail and the Telegram proxy hangs on
+connect, forever, with no error.
+
+`routing.py` puts a `domain:BASE_DOMAIN` exemption ahead of every RU rule, and
+`--test` asserts all four hostnames still resolve to `direct`. The Happ profile
+sends that zone direct as well, so a client never reaches the entry point
+through the tunnel at all.
 
 ## What to tell people
 
