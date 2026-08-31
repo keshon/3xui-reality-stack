@@ -35,8 +35,18 @@ from panel import DB_PATH, ROOT, Panel, as_dict, env_file, users, xray_healthy
 CRT = "/certs/certs/{}.crt"      # paths as seen inside the 3x-ui container
 KEY = "/certs/private/{}.key"
 
-SNIFF = json.dumps({"enabled": False, "destOverride": [],
-                    "metadataOnly": False, "routeOnly": False})
+# Sniffing must be ON or `protocol: ["bittorrent"]` in the routing rules can
+# never match - Xray classifies the protocol by reading the first payload, and
+# with sniffing off there is nothing to match against. 3x-ui ships that rule in
+# its default template, so leaving sniffing off produces a config that looks
+# like it blocks torrents and does not.
+#
+# routeOnly keeps it to that. The sniffed name is used for ROUTING decisions
+# only and never replaces the address the client asked for, so this cannot
+# introduce the usual destOverride failure where a connection is re-pointed at
+# whatever the server's own resolver returns for the sniffed name.
+SNIFF = json.dumps({"enabled": True, "destOverride": ["http", "tls", "quic"],
+                    "metadataOnly": False, "routeOnly": True})
 ALLOC = json.dumps({"strategy": "always", "refresh": 5, "concurrency": 3})
 
 
@@ -139,9 +149,34 @@ def set_reality_fingerprint(fp, db=DB_PATH):
     return fixed
 
 
+def enable_sniffing(db=DB_PATH):
+    """Turn sniffing on for the Xray inbounds. See SNIFF above for why."""
+    con = sqlite3.connect(db)
+    want = json.loads(SNIFF)
+    fixed = 0
+    for iid, sn in con.execute(
+            "select id, sniffing from inbounds "
+            "where protocol in ('vless','trojan','hysteria')"):
+        try:
+            cur = json.loads(sn) if sn else {}
+        except (TypeError, ValueError):
+            cur = {}
+        if not cur.get("enabled") or cur.get("routeOnly") != want["routeOnly"]:
+            con.execute("update inbounds set sniffing=? where id=?",
+                        (SNIFF, iid))
+            fixed += 1
+    con.commit()
+    return fixed
+
+
 def main():
     if "--repair-hysteria" in sys.argv:
         print(f"repaired {repair_hysteria_version()} hysteria inbound(s); "
+              f"restart 3x-ui to apply")
+        return
+
+    if "--sniffing" in sys.argv:
+        print(f"enabled sniffing on {enable_sniffing()} inbound(s); "
               f"restart 3x-ui to apply")
         return
 
@@ -292,6 +327,9 @@ def main():
     fp = e.get("REALITY_FINGERPRINT")
     if fp and set_reality_fingerprint(fp):
         print(f"set fingerprint={fp} on the reality inbound(s)")
+    n = enable_sniffing()
+    if n:
+        print(f"enabled sniffing on {n} inbound(s) - the bittorrent rule needs it")
 
     if not xray_healthy():
         print("WARNING: Xray is not healthy - docker logs 3x-ui", file=sys.stderr)
