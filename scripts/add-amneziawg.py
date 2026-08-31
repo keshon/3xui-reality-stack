@@ -85,6 +85,21 @@ def main():
         "subnetIp": e.get("AWG_SUBNET", "10.8.1.0"),
         "primaryDns": "1.1.1.1",
         "secondaryDns": "1.0.0.1",
+        # Sets the server's netstack MTU AND emits the "MTU =" line into every
+        # generated client config - 3x-ui writes that line only when this is
+        # non-zero, so leaving it unset means clients fall back to WireGuard's
+        # 1420. That is too big here. Plain WG budgets 60 bytes of overhead
+        # (IP 20 + UDP 8 + header 16 + Poly1305 16); AmneziaWG 3.1 then adds up
+        # to ~64 more of transport junk (S4), content padding and random
+        # trailers. On a 1500-byte path that leaves ~1376, and access networks
+        # are rarely 1500 - a phone on this deployment advertised MSS 1394,
+        # i.e. a 1434-byte path, which leaves ~1310.
+        #
+        # Too-large packets do not fail cleanly. Small requests fit and work,
+        # so the tunnel looks alive; anything that fills a packet stalls and
+        # retries. That is the "video takes 12 seconds to start and then
+        # rebuffers" shape.
+        "mtu": int(e.get("AWG_MTU") or 1280),
     }
     if any(server.get(k) != v for k, v in want.items()):
         server.update(want)
