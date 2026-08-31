@@ -101,13 +101,21 @@ def main():
         # rebuffers" shape.
         "mtu": int(e.get("AWG_MTU") or 1280),
     }
+    # AWG_PORT lives in .env and the compose file publishes it, but the inbound
+    # keeps its own copy - reconcile it here or changing the port in .env moves
+    # only the published port and leaves the listener behind it unchanged.
+    overrides = {}
+    if inb["port"] != port:
+        overrides["port"] = port
     if any(server.get(k) != v for k, v in want.items()):
         server.update(want)
         st["server"] = server
-        r = p.update_inbound(inb, settings=json.dumps(st))
-        print(f"  interface={want['externalInterface']} "
-              f"subnet={want['subnetIp']}/24:", r.get("success"),
-              r.get("msg", ""))
+        overrides["settings"] = json.dumps(st)
+    if overrides:
+        r = p.update_inbound(inb, **overrides)
+        print(f"  port={port} interface={want['externalInterface']} "
+              f"subnet={want['subnetIp']}/24 mtu={want['mtu']}:",
+              r.get("success"), r.get("msg", ""))
         if not r.get("success"):
             sys.exit(1)
         inb = p.inbound("amneziawg")
