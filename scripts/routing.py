@@ -155,6 +155,84 @@ def test(p, inbound_tag):
     return bad
 
 
+# ── the client half, delivered through the subscription ─────────────────────
+# Refusing Russian destinations on the server is only half a policy: each
+# device still has to send them somewhere, or the site simply fails to load.
+#
+# Happ reads a routing profile straight off the subscription response - 3x-ui
+# sets `Routing-Enable: true` and `Routing: happ://routing/onadd/<base64 json>`
+# headers, and Happ applies the profile on add. So this is configured once here
+# rather than by hand on every phone.
+#
+# Field names and types are Happ's, not Xray's: booleans are the STRINGS
+# "true"/"false", and the site/ip lists are arrays.
+# https://www.happ.su/main/dev-docs/routing
+HAPP_DIRECT_SITES = ["geosite:tld-ru", "geosite:category-ru"]
+HAPP_DIRECT_IP = ["geoip:ru", "geoip:private"]
+
+
+def happ_profile(env):
+    base = env.get("BASE_DOMAIN", "").strip()
+    # The server's own zone goes direct as well - a client must never reach the
+    # tunnel's entry point through the tunnel. On a .ru zone the RU rules would
+    # otherwise catch it, and it saves a pointless hairpin in every case.
+    direct_sites = (["domain:" + base] if base else []) + HAPP_DIRECT_SITES
+    return {
+        "Name": "%s - RU direct" % (base or "vpn"),
+        "GlobalProxy": "true",
+        "DomainStrategy": "IPIfNonMatch",
+        "DirectSites": direct_sites,
+        "DirectIp": HAPP_DIRECT_IP,
+        # Deliberately no Geositeurl/Geoipurl override. Pointing Happ at the
+        # runetfreedom build would make the category list match the server's
+        # exactly, but that file is ~73 MB - a lot to push onto seven phones
+        # for the sake of the long tail. tld-ru plus category-ru covers .ru,
+        # .su, .moscow, .tatar and the Cyrillic TLDs from the lists Happ
+        # already ships.
+    }
+
+
+def install_happ(p, env, apply_it):
+    profile = happ_profile(env)
+    blob = json.dumps(profile, separators=(",", ":")).encode()
+    link = "happ://routing/onadd/" + base64.b64encode(blob).decode()
+    print(json.dumps(profile, indent=2))
+    print("\n%s\n" % link)
+    if not apply_it:
+        print("dry run - re-run with --apply to install it on the subscription")
+        return
+    cur = p.settings()
+    if not cur:
+        sys.exit("could not read the panel settings")
+    new = dict(cur)
+    new["subEnableRouting"] = True
+    new["subRoutingRules"] = link
+    r = p.update_settings(new)
+    if not r.get("success"):
+        sys.exit("subscription routing not saved: %s" % r.get("msg"))
+    print("installed on the subscription")
+
+
+def check_happ_headers(env):
+    """Confirm the headers really are on a subscription response."""
+    import sqlite3
+    import urllib.request
+    from panel import DB_PATH, container_ip
+    row = sqlite3.connect(DB_PATH).execute(
+        "select sub_id from clients limit 1").fetchone()
+    if not row:
+        print("  (no clients yet - nothing to check)")
+        return
+    url = "http://%s:2096%s/%s" % (container_ip(),
+                                   env["SUB_PATH"].rstrip("/"), row[0])
+    req = urllib.request.Request(url, headers={"Host": env["PUBLIC_DOMAIN"]})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        for h in ("Routing-Enable", "Routing"):
+            v = resp.headers.get(h)
+            print("  %-16s %s" % (h + ":", (v[:72] + "...") if v and len(v) > 72
+                                  else (v or "MISSING")))
+
+
 def show(routing):
     print("domainStrategy: %s" % routing.get("domainStrategy"))
     for r in routing.get("rules", []):
@@ -176,7 +254,8 @@ def main():
     if "--domain-strategy" in sys.argv:
         strategy = sys.argv[sys.argv.index("--domain-strategy") + 1]
 
-    p = Panel(env_file()).login()
+    e = env_file()
+    p = Panel(e).login()
     tpl = get_template(p)
     routing = tpl.setdefault("routing", {})
     rules = routing.setdefault("rules", [])
@@ -216,6 +295,19 @@ def main():
                      "policy that would enforce nothing")
 
         new = []
+        # THIS SERVER'S OWN ZONE, FIRST. Learned the hard way: the domains
+        # everything here is reached by - the subscription URL, the panel, and
+        # the MTProto proxy's fronting name - are subdomains of BASE_DOMAIN,
+        # and if that is a .ru zone then geosite:tld-ru blocks them. A client
+        # whose traffic already goes through the tunnel then cannot reach the
+        # tunnel's own hostnames: subscription updates fail, and the Telegram
+        # proxy hangs forever on connect.
+        #
+        # `domain:` is a suffix match, so this covers every subdomain.
+        base = e.get("BASE_DOMAIN", "").strip()
+        if base:
+            new.append({"ruleTag": TAG + "self", "type": "field",
+                        "domain": ["domain:" + base], "outboundTag": "direct"})
         if ps:
             new.append({"ruleTag": TAG + "ru-blocked-proxy", "type": "field",
                         "domain": ps, "outboundTag": "direct"})
