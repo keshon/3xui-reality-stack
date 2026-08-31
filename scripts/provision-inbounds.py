@@ -63,10 +63,46 @@ def repair_hysteria_version(db=DB_PATH):
     return fixed
 
 
+def repair_vless_encryption(db=DB_PATH):
+    """Set settings.encryption="none" on every VLESS inbound.
+
+    3x-ui only ever echoes this field into generated client configs - it strips
+    it again when building the Xray config (StripVlessInboundEncryption), so it
+    cannot reach or upset the running core. Leaving it unset is not neutral:
+
+      * the plain share link omits `encryption` entirely, and each client
+        decides for itself what the default is;
+      * the JSON subscription emits `"encryption": ""`, which is not a legal
+        VLESS outbound value - Xray rejects the outbound and that client loses
+        the Reality lane while every other lane keeps working.
+
+    Xray 26.x added real VLESS encryption, where this field holds a generated
+    "mlkem768x25519plus..." string. "none" means off, which is what a Reality
+    inbound wants: the encryption is Reality's.
+    """
+    con = sqlite3.connect(db)
+    fixed = 0
+    for iid, st in con.execute(
+            "select id, settings from inbounds where protocol='vless'"):
+        cfg = json.loads(st)
+        if cfg.get("encryption") != "none":
+            cfg["encryption"] = "none"
+            con.execute("update inbounds set settings=? where id=?",
+                        (json.dumps(cfg), iid))
+            fixed += 1
+    con.commit()
+    return fixed
+
+
 def main():
     if "--repair-hysteria" in sys.argv:
         print(f"repaired {repair_hysteria_version()} hysteria inbound(s); "
               f"restart 3x-ui to apply")
+        return
+
+    if "--repair-links" in sys.argv:
+        print(f"set encryption=none on {repair_vless_encryption()} "
+              f"vless inbound(s)")
         return
 
     e = env_file()
@@ -106,8 +142,10 @@ def main():
             "remark": "vless-reality", "enable": True, "listen": "",
             "port": 443, "protocol": "vless", "expiryTime": 0,
             "up": 0, "down": 0, "total": 0,
+            # decryption is what Xray reads; encryption is echoed into the
+            # client configs. See repair_vless_encryption().
             "settings": json.dumps({"clients": clients, "decryption": "none",
-                                    "fallbacks": []}),
+                                    "encryption": "none", "fallbacks": []}),
             "streamSettings": json.dumps({
                 "network": "tcp", "security": "reality",
                 "realitySettings": {
@@ -195,6 +233,9 @@ def main():
     n = repair_hysteria_version()
     if n:
         print(f"repaired settings.version on {n} hysteria inbound(s)")
+    n = repair_vless_encryption()
+    if n:
+        print(f"set settings.encryption=none on {n} vless inbound(s)")
 
     if not xray_healthy():
         print("WARNING: Xray is not healthy - docker logs 3x-ui", file=sys.stderr)
