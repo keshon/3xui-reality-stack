@@ -28,6 +28,7 @@ Things that are not obvious and cost time to find:
 
 Run on the server:  PANEL_USER=... PANEL_PASS=... python3 scripts/add-amneziawg.py
 """
+import base64
 import json
 import secrets
 import sqlite3
@@ -39,11 +40,31 @@ from panel import DB_PATH, Panel, as_dict, env_file, users, xray_healthy
 
 
 def wg_keypair():
-    priv = subprocess.run(["wg", "genkey"], capture_output=True,
-                          text=True).stdout.strip()
-    pub = subprocess.run(["wg", "pubkey"], input=priv, capture_output=True,
-                         text=True).stdout.strip()
-    return priv, pub
+    """A Curve25519 keypair in WireGuard's base64 format.
+
+    `wg genkey | wg pubkey` is the usual way, but wireguard-tools is not
+    installed on a minimal Ubuntu and nothing else here wants it: no kernel
+    module and no interface is involved, this is only a key. openssl is already
+    a hard dependency and produces byte-identical keys - the raw 32 bytes are
+    the tail of the DER in both the PKCS#8 private and the SPKI public form.
+
+    Raises rather than returning empty strings: the panel accepts an empty
+    privateKey, reports success, and then silently runs nothing.
+    """
+    def openssl(args, stdin=None):
+        r = subprocess.run(["openssl", *args], input=stdin, capture_output=True)
+        if r.returncode != 0:
+            raise SystemExit(f"openssl {args[0]} failed: "
+                             f"{r.stderr.decode(errors='replace').strip()[:200]}")
+        return r.stdout
+
+    priv_der = openssl(["genpkey", "-algorithm", "X25519", "-outform", "DER"])
+    pub_der = openssl(["pkey", "-inform", "DER", "-pubout", "-outform", "DER"],
+                      stdin=priv_der)
+    if len(priv_der) < 32 or len(pub_der) < 32:
+        raise SystemExit("openssl returned a truncated X25519 key")
+    return (base64.b64encode(priv_der[-32:]).decode(),
+            base64.b64encode(pub_der[-32:]).decode())
 
 
 def default_iface():

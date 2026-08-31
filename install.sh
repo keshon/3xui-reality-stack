@@ -97,19 +97,17 @@ if ! command -v docker >/dev/null 2>&1; then
   curl -fsSL https://get.docker.com | sh >/dev/null 2>&1 || die "docker install failed"
 fi
 ok "docker $(docker --version | awk '{print $3}' | tr -d ,)"
-# `wg` generates the AmneziaWG server keypair (scripts/add-amneziawg.py). It is
-# not present by default on a minimal Ubuntu, and without it the keypair comes
-# back as two empty strings - which the panel accepts and then cannot run.
-MISSING=""
-for c in openssl wg; do command -v "$c" >/dev/null || MISSING="$MISSING $c"; done
-if [ -n "$MISSING" ]; then
+# openssl is the only host binary the scripts shell out to: secrets here, and
+# the AmneziaWG Curve25519 keypair in add-amneziawg.py. wireguard-tools is
+# deliberately NOT required - no kernel module or interface is involved in
+# generating a key, and openssl produces byte-identical ones.
+if ! command -v openssl >/dev/null 2>&1; then
   apt-get -qq update >/dev/null 2>&1 || true
-  for c in $MISSING; do
-    case "$c" in wg) pkg=wireguard-tools;; *) pkg=$c;; esac
-    apt-get -qq -y install "$pkg" >/dev/null 2>&1 || warn "could not install $pkg"
-  done
+  # Show why, if it fails. A half-configured dpkg is a common cause and is
+  # invisible when the output goes to /dev/null.
+  apt-get -qq -y install openssl 2>&1 | tail -3 | sed 's/^/        /'     || warn "could not install openssl"
 fi
-command -v wg >/dev/null && ok "wireguard-tools present"   || warn "no 'wg' binary - the amneziawg lane will be skipped"
+command -v openssl >/dev/null || die "openssl is required and could not be installed"
 bash scripts/host-tune.sh >/dev/null 2>&1 || warn "host-tune.sh reported a problem"
 ok "congestion control: $(sysctl -n net.ipv4.tcp_congestion_control)"
 
