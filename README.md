@@ -110,6 +110,7 @@ scripts/
   panel.py                3x-ui API client (all the quirks live here)
   resolve-users.py        users.txt + USERS= -> one validated list
   client-links.py         a subscription, unpacked into per-lane entries
+  routing.py              the routing policy; --test asks Xray to prove it
   provision-inbounds.py   creates the Xray lanes; --repair-hysteria
   add-mtproto.py          MTProto lane, fronting your own domain
   add-amneziawg.py        AmneziaWG v1.5 lane, obfuscation randomised per host
@@ -119,6 +120,7 @@ scripts/
   triage.sh               read-only network diagnostics
 docs/
   choosing-a-lane.md      which lane to use, and what a failure means
+  routing.md              no BitTorrent, no Russian destinations
   gotchas.md              things that accept config they cannot run
   reality.md              choosing target and serverNames
   diagnosing.md           three failure classes, one measurement
@@ -143,6 +145,10 @@ python3 scripts/provision-inbounds.py --repair-hysteria && docker restart 3x-ui
 
 # what to hand each person (writes CLIENT-LINKS.txt, mode 600)
 python3 scripts/client-links.py --write --awg-dir awg
+
+# routing policy: no BitTorrent, no Russian destinations
+python3 scripts/routing.py --apply
+python3 scripts/routing.py --test
 
 # network diagnostics
 bash scripts/triage.sh
