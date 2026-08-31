@@ -17,6 +17,10 @@ hysteria/config.yaml
 # scratch / research material, not part of the stack
 tmp/
 
+# python
+__pycache__/
+*.pyc
+
 # editors / os
 *.swp
 *~
