@@ -131,14 +131,17 @@ def test(p, inbound_tag):
             except ValueError:
                 return obj
         if isinstance(obj, dict):
-            return obj.get("outboundTag") or obj.get("outbound") or str(obj)[:60]
+            tag = obj.get("outboundTag") or obj.get("outbound") or ""
+            # No rule matched: Xray falls through to the FIRST outbound, which
+            # is `direct` here. An empty tag is that, not a failure.
+            return tag or "direct*"
         return str(obj)[:60] if obj is not None else "?" + str(r.get("msg", ""))[:40]
 
     bad = 0
     for what, kind, want in CHECKS:
         got = route(**{kind: what}, port="443", network="tcp",
                     inboundTag=inbound_tag)
-        ok = got == want
+        ok = got == want or (want == "direct" and got == "direct*")
         bad += not ok
         print("  %-16s want=%-8s got=%-10s %s"
               % (what, want, got, "ok" if ok else "MISMATCH"))
@@ -186,7 +189,6 @@ def main():
         tag = "in-443-tcp"
         if "--inbound" in sys.argv:
             tag = sys.argv[sys.argv.index("--inbound") + 1]
-            
         print("asking Xray where it would send each destination (via %s)" % tag)
         sys.exit(1 if test(p, tag) else 0)
 
