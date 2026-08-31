@@ -55,7 +55,8 @@ def fetch_subscription(env, sub_id):
         raise SystemExit("3x-ui container is not running")
     url = f"http://{ip}:2096{env['SUB_PATH'].rstrip('/')}/{sub_id}"
     with urllib.request.urlopen(url, timeout=20) as r:
-        return b64decode_loose(r.read().decode()).splitlines()
+        body = b64decode_loose(r.read().decode())
+    return body.decode("utf-8", "replace").splitlines()
 
 
 def main():
