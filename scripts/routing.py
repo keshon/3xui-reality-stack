@@ -22,6 +22,7 @@ process for every lane, so a single unknown category takes the whole server
 down rather than just its own rule.
 
     python3 scripts/routing.py --show
+    python3 scripts/routing.py --test
     python3 scripts/routing.py --apply
     python3 scripts/routing.py --apply --domain-strategy AsIs
     python3 scripts/routing.py --remove
@@ -106,6 +107,51 @@ def strip_ours(rules):
     return [r for r in rules if not str(r.get("ruleTag", "")).startswith(TAG)]
 
 
+# (what, kind, expected outbound). Reading the rule list proves the rules were
+# written; only asking Xray itself proves they decide anything.
+CHECKS = [
+    ("sberbank.ru", "domain", "blocked"), ("gosuslugi.ru", "domain", "blocked"),
+    ("yandex.ru", "domain", "blocked"), ("mail.ru", "domain", "blocked"),
+    ("nalog.ru", "domain", "blocked"), ("avito.ru", "domain", "blocked"),
+    ("vk.com", "domain", "blocked"), ("kinopoisk.ru", "domain", "blocked"),
+    ("xn--80asehdb", "domain", "blocked"),
+    ("meduza.io", "domain", "direct"), ("youtube.com", "domain", "direct"),
+    ("google.com", "domain", "direct"), ("github.com", "domain", "direct"),
+    ("wikipedia.org", "domain", "direct"),
+]
+
+
+def test(p, inbound_tag):
+    def route(**kw):
+        r = p.post("/panel/api/xray/routeTest", kw, as_json=False)
+        obj = (r or {}).get("obj")
+        if isinstance(obj, str):
+            try:
+                obj = json.loads(obj)
+            except ValueError:
+                return obj
+        if isinstance(obj, dict):
+            return obj.get("outboundTag") or obj.get("outbound") or str(obj)[:60]
+        return str(obj)[:60] if obj is not None else "?" + str(r.get("msg", ""))[:40]
+
+    bad = 0
+    for what, kind, want in CHECKS:
+        got = route(**{kind: what}, port="443", network="tcp",
+                    inboundTag=inbound_tag)
+        ok = got == want
+        bad += not ok
+        print("  %-16s want=%-8s got=%-10s %s"
+              % (what, want, got, "ok" if ok else "MISMATCH"))
+    got = route(domain="tracker.example.com", port="6881", network="tcp",
+                protocol="bittorrent", inboundTag=inbound_tag)
+    ok = got == "blocked"
+    bad += not ok
+    print("  %-16s want=%-8s got=%-10s %s"
+          % ("bittorrent", "blocked", got, "ok" if ok else "MISMATCH"))
+    print("\n%d check(s) did not match" % bad if bad else "\nall checks passed")
+    return bad
+
+
 def show(routing):
     print("domainStrategy: %s" % routing.get("domainStrategy"))
     for r in routing.get("rules", []):
@@ -119,7 +165,8 @@ def show(routing):
 
 
 def main():
-    if not any(a in sys.argv for a in ("--show", "--apply", "--remove")):
+    if not any(a in sys.argv for a in ("--show", "--apply", "--remove",
+                                       "--test")):
         sys.exit(__doc__)
 
     strategy = "IPIfNonMatch"
@@ -134,6 +181,14 @@ def main():
     if "--show" in sys.argv:
         show(routing)
         return
+
+    if "--test" in sys.argv:
+        tag = "in-443-tcp"
+        if "--inbound" in sys.argv:
+            tag = sys.argv[sys.argv.index("--inbound") + 1]
+            
+        print("asking Xray where it would send each destination (via %s)" % tag)
+        sys.exit(1 if test(p, tag) else 0)
 
     backup = os.path.join(ROOT, "xray-template.backup.json")
     with open(backup, "w", newline="\n") as f:
