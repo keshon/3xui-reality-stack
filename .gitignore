@@ -27,3 +27,6 @@ __pycache__/
 *.swp
 *~
 .DS_Store
+
+# written by scripts/routing.py before it changes anything
+xray-template.backup.json
