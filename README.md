@@ -20,7 +20,8 @@ subscription URL, and a real website as cover.
 ```
 
 The reverse proxy keeps doing everything it normally does — the panel, ACME,
-whatever else you host. It just no longer sits in Reality's data path.
+whatever else you host. It just no longer sits in Reality's data path. To put
+your own sites behind it, see [docs/other-apps.md](docs/other-apps.md).
 
 ## Why this shape
 
@@ -113,6 +114,7 @@ docs/
   gotchas.md              things that accept config they cannot run
   reality.md              choosing target and serverNames
   diagnosing.md           three failure classes, one measurement
+  other-apps.md           putting your own sites behind the same proxy
 ```
 
 ## Operating
