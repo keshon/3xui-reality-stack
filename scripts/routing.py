@@ -59,11 +59,20 @@ RU_IP = ["geoip:ru"]
 
 
 def get_template(p):
+    """Read the Xray config template.
+
+    `obj` comes back as a JSON *string* wrapping the real payload, so it needs
+    decoding once before xraySetting is reachable - and xraySetting itself may
+    be either an object or another JSON string depending on how it was last
+    written.
+    """
     r = p.post("/panel/api/xray/", {}, as_json=False)
-    obj = (r or {}).get("obj") or {}
-    t = obj.get("xraySetting")
+    obj = (r or {}).get("obj")
+    if isinstance(obj, str):
+        obj = json.loads(obj)
+    t = (obj or {}).get("xraySetting")
     if t is None:
-        raise SystemExit("could not read the Xray template: %s" % r)
+        raise SystemExit("could not read the Xray template: %s" % str(r)[:200])
     return t if isinstance(t, dict) else json.loads(t)
 
 
