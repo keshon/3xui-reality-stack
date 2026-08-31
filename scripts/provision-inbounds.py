@@ -94,6 +94,51 @@ def repair_vless_encryption(db=DB_PATH):
     return fixed
 
 
+# uTLS profiles Xray knows. "random"/"randomized" pick per connection.
+FINGERPRINTS = {"chrome", "firefox", "safari", "ios", "android", "edge",
+                "360", "qq", "random", "randomized"}
+
+
+def set_reality_fingerprint(fp, db=DB_PATH):
+    """Set the uTLS fingerprint published to clients on the Reality inbounds.
+
+    `fp` is a purely client-side choice - it selects which browser's ClientHello
+    the client imitates. The server only publishes a suggestion, which 3x-ui
+    copies into the share link as `fp=`.
+
+    It matters far more than it looks. Current Chrome sends a post-quantum key
+    share (X25519MLKEM768) roughly 1.2 KB on its own, which pushes the whole
+    ClientHello past 1700 bytes - over one segment on any normal path. The
+    handshake then arrives in two TCP segments, and a middlebox that forwards
+    the first and drops the second leaves it permanently half-delivered: the
+    server ACKs what it got and waits for a continuation that never comes, so
+    the connection hangs with no RST and no error anywhere. Other lanes on the
+    same host and port keep working, because only this one sends a ClientHello
+    that large.
+
+    A profile without the post-quantum key share (safari, ios) fits in a single
+    segment and never gives such a middlebox the seam to cut.
+    """
+    if fp not in FINGERPRINTS:
+        raise SystemExit(f"unknown fingerprint {fp!r}; pick one of "
+                         f"{', '.join(sorted(FINGERPRINTS))}")
+    con = sqlite3.connect(db)
+    fixed = 0
+    for iid, ss in con.execute(
+            "select id, stream_settings from inbounds where protocol='vless'"):
+        cfg = json.loads(ss)
+        r = cfg.get("realitySettings")
+        if not r:
+            continue
+        if (r.get("settings") or {}).get("fingerprint") != fp:
+            r.setdefault("settings", {})["fingerprint"] = fp
+            con.execute("update inbounds set stream_settings=? where id=?",
+                        (json.dumps(cfg), iid))
+            fixed += 1
+    con.commit()
+    return fixed
+
+
 def main():
     if "--repair-hysteria" in sys.argv:
         print(f"repaired {repair_hysteria_version()} hysteria inbound(s); "
@@ -103,6 +148,12 @@ def main():
     if "--repair-links" in sys.argv:
         print(f"set encryption=none on {repair_vless_encryption()} "
               f"vless inbound(s)")
+        return
+
+    if "--fingerprint" in sys.argv:
+        fp = sys.argv[sys.argv.index("--fingerprint") + 1]
+        print(f"set fingerprint={fp} on {set_reality_fingerprint(fp)} "
+              f"reality inbound(s); restart 3x-ui to apply")
         return
 
     e = env_file()
@@ -161,8 +212,10 @@ def main():
                     "privateKey": os.environ["REALITY_PRIV"],
                     "shortIds": short_ids,
                     "settings": {"publicKey": os.environ["REALITY_PUB"],
-                                 "fingerprint": "chrome", "serverName": "",
-                                 "spiderX": "/"}},
+                                 # see set_reality_fingerprint()
+                                 "fingerprint": e.get("REALITY_FINGERPRINT")
+                                 or "chrome",
+                                 "serverName": "", "spiderX": "/"}},
                 "tcpSettings": {"acceptProxyProtocol": False,
                                 "header": {"type": "none"}},
                 # Without this, 3x-ui builds the link address from the HTTP
@@ -236,6 +289,9 @@ def main():
     n = repair_vless_encryption()
     if n:
         print(f"set settings.encryption=none on {n} vless inbound(s)")
+    fp = e.get("REALITY_FINGERPRINT")
+    if fp and set_reality_fingerprint(fp):
+        print(f"set fingerprint={fp} on the reality inbound(s)")
 
     if not xray_healthy():
         print("WARNING: Xray is not healthy - docker logs 3x-ui", file=sys.stderr)
