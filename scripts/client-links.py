@@ -46,15 +46,21 @@ def b64decode_loose(s):
 def fetch_subscription(env, sub_id):
     """Read a subscription from the panel directly.
 
-    Over the container network on :2096, not the public https URL: this runs on
-    the same host, and a public fetch would depend on DNS hairpinning and on the
-    tunnel it is meant to be reporting on.
+    Over the container network on :2096 rather than the public https URL: this
+    runs on the same host, and a public fetch would depend on DNS hairpinning
+    and on the very tunnel it is meant to be reporting on.
+
+    The Host header must still be PUBLIC_DOMAIN. 3x-ui builds the AmneziaWG
+    `Endpoint` and the MTProto `server` from the host the subscription was
+    requested with - not from any configured value - so fetching by container
+    IP hands out configs pointing at 172.x.
     """
     ip = container_ip()
     if not ip:
         raise SystemExit("3x-ui container is not running")
     url = f"http://{ip}:2096{env['SUB_PATH'].rstrip('/')}/{sub_id}"
-    with urllib.request.urlopen(url, timeout=20) as r:
+    req = urllib.request.Request(url, headers={"Host": env["PUBLIC_DOMAIN"]})
+    with urllib.request.urlopen(req, timeout=20) as r:
         body = b64decode_loose(r.read().decode())
     return body.decode("utf-8", "replace").splitlines()
 
