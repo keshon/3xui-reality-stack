@@ -60,6 +60,54 @@ reverse proxy's `respondingTimeouts` first, then whether client-side mux is on.
 - **VLESS + `xtls-rprx-vision`** → mux **OFF**. Vision does its own stream
   handling; mux.cool on top defeats the record shaping it exists to provide.
 
+## A ClientHello that arrives half-delivered
+
+One lane dead, every other lane on the same address and port fine, no error
+anywhere — not in the Xray log, not in the reverse proxy's, not on the client
+beyond a timeout. Reality only.
+
+```bash
+tcpdump -i <wan> -n -s 300 -w /tmp/c.pcap 'tcp port 443'
+tcpdump -nr /tmp/c.pcap -X 'tcp and host <client> and greater 100' | head -20
+```
+
+Read the first data packet the client sends. A TLS record header is
+`16 03 01 <len16>`, so `16 03 01 06 f6` declares 1782 bytes of ClientHello
+plus the 5-byte header. Compare that against what actually arrived:
+
+```
+client → 1382 bytes    record header says 1782
+server → ack 1383      and then nothing, ever
+```
+
+The server ACKs what it got and waits for a continuation that never comes.
+There is no RST, no FIN and no client retransmission — the flow simply stops,
+and the client opens another one a second later and repeats.
+
+**Why only Reality.** `fp=chrome` makes uTLS emit Chrome's post-quantum key
+share, X25519MLKEM768, about 1.2 KB by itself. That pushes the ClientHello
+past 1700 bytes, so it no longer fits in one segment. Nothing else here sends
+one that large: trojan's TLS is the client's own stack, and Hysteria2 is QUIC.
+A middlebox then only has to forward the first segment and drop the second.
+
+**What to change.** `REALITY_FINGERPRINT` in `.env`, or on a live inbound:
+
+```bash
+python3 scripts/provision-inbounds.py --fingerprint safari
+docker restart 3x-ui
+```
+
+`safari` and `ios` carry no post-quantum key share and fit in a single
+segment. It is a client-side setting — the server only publishes it in the
+subscription as `fp=` and never checks it — so clients must re-read the
+subscription for it to take effect.
+
+Two things this is *not*, and the same capture rules both out. If the address
+were blocked, the SYN would not be answered and the other lanes would die
+with it. If Reality were rejecting the handshake, the connection would fall
+through to `target` and the client would receive a certificate chain — several
+kilobytes back, not zero.
+
 ## `ping -M do` does not measure what TCP does
 
 A worked example of getting this wrong. On one server:
