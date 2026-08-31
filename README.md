@@ -89,7 +89,8 @@ and prints one subscription URL per person.
 | obfuscated UDP | AmneziaWG v1.5 | 51820/udp | run by the panel, not Xray; no NET_ADMIN needed |
 
 Hand out one subscription URL per person; it carries every lane and updates
-itself. Let the client (Happ, Hiddify, v2rayN) pick between them with `urltest`.
+itself. Which lane to actually use, and what it means when one stops, is in
+[docs/choosing-a-lane.md](docs/choosing-a-lane.md).
 
 AmneziaWG is the exception worth knowing about. It rides in the subscription as
 a `vpn://` entry, which only the Amnezia clients understand — Happ, v2rayN and
@@ -117,6 +118,7 @@ scripts/
   host-tune.sh            BBR + fq, buffers, tcp_mtu_probing
   triage.sh               read-only network diagnostics
 docs/
+  choosing-a-lane.md      which lane to use, and what a failure means
   gotchas.md              things that accept config they cannot run
   reality.md              choosing target and serverNames
   diagnosing.md           three failure classes, one measurement
