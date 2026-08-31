@@ -40,9 +40,61 @@ def env_file(path=ENV_PATH):
     return out
 
 
-def users(env=None):
+class BadUsername(ValueError):
+    pass
+
+
+# Client emails are namespaced per lane as "r-<who>", "t-<who>", "h-<who>", and
+# consolidate-clients.py recovers <who> with split("-", 1)[-1]. A '-' inside the
+# name itself would make that recover the wrong person, so it is rejected here
+# rather than discovered later as a silently mis-merged account.
+USERNAME_RE = re.compile(r"^[a-z0-9_]{1,24}$")
+
+
+def parse_users(text):
+    """Parse a username list. One name per line; '#' starts a comment; blank
+    lines are ignored. Commas and spaces also separate, so a USERS= value can
+    be pasted in verbatim. Returns lowercased names in first-seen order."""
+    out, seen = [], set()
+    for lineno, raw in enumerate(text.splitlines(), 1):
+        for name in raw.split("#", 1)[0].replace(",", " ").split():
+            n = name.lower()
+            if not USERNAME_RE.match(n):
+                raise BadUsername(
+                    f"line {lineno}: {name!r} is not a usable username - use "
+                    f"1-24 chars of a-z, 0-9 or '_' (no '-', it collides with "
+                    f"the per-lane email prefix)")
+            if n in seen:
+                continue
+            seen.add(n)
+            out.append(n)
+    return out
+
+
+def users_file(env=None):
+    """Path of the username list, or None if this deployment does not use one."""
     env = env or env_file()
-    return [x.strip() for x in env.get("USERS", "user1").split(",") if x.strip()]
+    name = env.get("USERS_FILE", "users.txt").strip()
+    if not name:
+        return None
+    path = name if os.path.isabs(name) else os.path.join(ROOT, name)
+    return path if os.path.exists(path) else None
+
+
+def users(env=None):
+    """The people to provision.
+
+    A users.txt file wins over USERS= in .env, so the list can be kept and
+    edited as a plain list. install.sh writes the resolved list back into
+    USERS= after reading it, so both stay in agreement.
+    """
+    env = env or env_file()
+    path = users_file(env)
+    if path:
+        found = parse_users(open(path, encoding="utf-8").read())
+        if found:
+            return found
+    return parse_users(env.get("USERS", "user1"))
 
 
 def container_ip(name="3x-ui"):

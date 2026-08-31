@@ -1,0 +1,13 @@
+# One account per line. Copy to users.txt; install.sh reads it and keeps
+# USERS= in .env in agreement.
+#
+# Names may use a-z, 0-9 and '_' only, up to 24 characters. No '-': client
+# emails are namespaced per lane as r-<name> / t-<name> / h-<name>, and the
+# consolidation step recovers <name> by splitting on the first '-'.
+#
+# Removing a name here does NOT delete the account - it only stops install.sh
+# from re-creating it. Delete the client in the panel to actually revoke access.
+
+alice
+bob
+carol

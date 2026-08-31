@@ -71,7 +71,15 @@ fi
 : "${PROXY_SUBNET:=172.28.0.0/16}"; set_env PROXY_SUBNET "$PROXY_SUBNET"
 : "${MTPROTO_PORT:=8443}";          set_env MTPROTO_PORT "$MTPROTO_PORT"
 : "${AWG_PORT:=51820}";             set_env AWG_PORT "$AWG_PORT"
-: "${USERS:=user1}";                set_env USERS "$USERS"
+
+# ── 1b. the account list ────────────────────────────────────────────────────
+# users.txt is the editable input, USERS= in .env is what every script reads.
+# Resolve both into one answer HERE, so an unusable name fails now rather than
+# half way through provisioning with some lanes already created.
+say "users"
+USERS="$(python3 scripts/resolve-users.py)" || die "fix the account list, then re-run"
+set_env USERS "$USERS"
+python3 scripts/resolve-users.py --list | sed 's/^/   /'
 
 # ── 2. DNS must resolve here before ACME will work ──────────────────────────
 say "dns"
@@ -171,16 +179,19 @@ echo "  panel      https://${PANEL_DOMAIN}${PANEL_PATH}/"
 echo
 echo "  subscriptions (one URL per person, all lanes):"
 python3 - <<'PY'
-import json, os, sqlite3
-root = os.path.dirname(os.path.abspath("install.sh"))
+import sqlite3
 env = {}
 for line in open(".env"):
     line = line.strip()
     if line and not line.startswith("#") and "=" in line:
         k, v = line.split("=", 1); env[k] = v.strip('"').strip("'")
+# PUBLIC_DOMAIN, not PANEL_DOMAIN: the subscription router is bound to the
+# public hostname (see xui/docker-compose.yml), and configure-subscription.py
+# writes the same host into subURI. Printing the admin hostname here would
+# hand out a URL that lands on the decoy.
 db = sqlite3.connect("xui/db/x-ui.db")
 for email, sub in db.execute("select email, sub_id from clients order by email"):
-    print(f"    {email:12} https://{env['PANEL_DOMAIN']}{env['SUB_PATH']}/{sub}")
+    print(f"    {email:12} https://{env['PUBLIC_DOMAIN']}{env['SUB_PATH']}/{sub}")
 PY
 echo
 echo "  credentials: ./CLIENT-CREDENTIALS.txt (mode 600)"

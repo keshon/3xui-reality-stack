@@ -54,8 +54,21 @@ forward UDP, which breaks all four lanes.
 ```bash
 git clone <this repo> /opt/xray-stack && cd /opt/xray-stack
 cp .env.example .env
-$EDITOR .env          # domains, email, Cloudflare token, USERS
+cp users.txt.example users.txt
+$EDITOR .env          # domains, email, Cloudflare token
+$EDITOR users.txt     # one account per line
 sudo ./install.sh
+```
+
+`users.txt` is one name per line, `#` comments allowed. It wins over `USERS=`
+in `.env`, and `install.sh` writes the resolved list back into `USERS=` so the
+two never disagree. Names are `a-z`, `0-9` and `_`, up to 24 characters — no
+`-`, because client emails are namespaced per lane as `r-<name>` / `t-<name>` /
+`h-<name>` and the consolidation step splits on the first `-` to recover the
+person. Check the list without deploying:
+
+```bash
+python3 scripts/resolve-users.py --list
 ```
 
 `install.sh` is idempotent — re-run it after editing `.env`. It generates any
@@ -82,11 +95,13 @@ itself. Let the client (Happ, Hiddify, v2rayN) pick between them with `urltest`.
 ```
 install.sh                one-shot installer
 bootstrap.sh              compose orchestration (idempotent)
+users.txt.example         the account list; copy to users.txt
 traefik/                  reverse proxy, ACME, cert extraction
 decoy/                    the site that fronts everything
 xui/                      3x-ui + Xray
 scripts/
   panel.py                3x-ui API client (all the quirks live here)
+  resolve-users.py        users.txt + USERS= -> one validated list
   provision-inbounds.py   creates the Xray lanes; --repair-hysteria
   add-mtproto.py          MTProto lane, fronting your own domain
   add-amneziawg.py        AmneziaWG v1.5 lane, obfuscation randomised per host
@@ -103,8 +118,10 @@ docs/
 ## Operating
 
 ```bash
-# add a person: append to USERS in .env, then
+# add a person: append a line to users.txt, then
 sudo ./install.sh
+# (removing a line only stops re-creation; delete the client in the panel
+#  to actually revoke access)
 
 # after ANY panel edit to the hysteria inbound (3x-ui strips a required field)
 python3 scripts/provision-inbounds.py --repair-hysteria && docker restart 3x-ui
