@@ -26,7 +26,10 @@ down rather than just its own rule.
     python3 scripts/routing.py --apply
     python3 scripts/routing.py --apply --domain-strategy AsIs
     python3 scripts/routing.py --remove
+    python3 scripts/routing.py --happ            # preview the client profile
+    python3 scripts/routing.py --happ --apply    # push it via the subscription
 """
+import base64
 import json
 import os
 import subprocess
@@ -256,7 +259,7 @@ def show(routing):
 
 def main():
     if not any(a in sys.argv for a in ("--show", "--apply", "--remove",
-                                       "--test")):
+                                       "--test", "--happ")):
         sys.exit(__doc__)
 
     strategy = "IPIfNonMatch"
@@ -271,6 +274,13 @@ def main():
 
     if "--show" in sys.argv:
         show(routing)
+        return
+
+    if "--happ" in sys.argv:
+        install_happ(p, e, "--apply" in sys.argv)
+        if "--apply" in sys.argv:
+            print("\nheaders on a real subscription response:")
+            check_happ_headers(e)
         return
 
     if "--test" in sys.argv:
