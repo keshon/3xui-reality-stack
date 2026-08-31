@@ -1,0 +1,17 @@
+:root { --fg:#1d1d1f; --muted:#6b6b70; --bg:#fbfbfa; --rule:#e3e3e0; }
+@media (prefers-color-scheme: dark) {
+  :root { --fg:#e8e8e6; --muted:#9a9a9e; --bg:#16161a; --rule:#2c2c31; }
+}
+* { box-sizing: border-box; }
+body { margin:0 auto; padding:3rem 1.25rem 5rem; max-width:38rem; background:var(--bg);
+  color:var(--fg); font:16px/1.65 Georgia, "Times New Roman", serif; }
+header { border-bottom:1px solid var(--rule); padding-bottom:1.5rem; margin-bottom:2.5rem; }
+h1 { font-size:1.6rem; margin:0 0 .35rem; letter-spacing:-.01em; }
+h2 { font-size:1.15rem; margin:0 0 .3rem; }
+.sub { color:var(--muted); margin:0; font-size:.95rem; }
+article { margin-bottom:2.75rem; }
+.date { color:var(--muted); font-size:.85rem; margin:0 0 .75rem; }
+p { margin:0 0 .9rem; }
+footer { border-top:1px solid var(--rule); padding-top:1.25rem; margin-top:3rem;
+  color:var(--muted); font-size:.85rem; }
+a { color:inherit; text-decoration:underline; text-underline-offset:2px; }

@@ -1,0 +1,68 @@
+name: xui
+
+networks:
+  proxy:
+    external: true
+
+services:
+  3x-ui:
+    image: ghcr.io/mhsanaei/3x-ui:v3.7.0     # was 2.6.6 - that Xray core has no VLESS Encryption
+    container_name: 3x-ui
+    restart: unless-stopped
+    networks: [proxy]
+    ports:
+      # Xray now owns the public TLS port. Traefik sits BEHIND it on :8443.
+      # This is the whole point of the rebuild: Reality must own the socket,
+      # or XTLS-Vision's record shaping is destroyed by the extra proxy hop.
+      - "443:443/tcp"
+      # udp/443 is Hysteria2, now an Xray inbound rather than a separate
+      # container - Xray 26.x implements Hysteria2 natively (proxy/hysteria).
+      # Looks like HTTP/3 on the wire, which is the point.
+      - "443:443/udp"
+      # MTProto proxy (mtg), FakeTLS. Run by 3x-ui out-of-band, NOT by Xray -
+      # xray has no mtproto implementation, so this cannot crash the core.
+      # NB: Traefik's 8443 is container-internal and never published, so the
+      # host port is free despite the coincidence.
+      - "8443:8443/tcp"
+      # AmneziaWG. Runs inside the panel (amneziawg-go) as an in-process
+      # userspace netstack - "embedded interface" in its log - so it needs NO
+      # NET_ADMIN and NO /dev/net/tun. Verified: it starts and listens without
+      # either. Only the published port is required.
+      - "${AWG_PORT:-51820}:${AWG_PORT:-51820}/udp"
+    volumes:
+      - ./db:/etc/x-ui/
+      - ../shared/certs:/certs:ro
+    environment:
+      TZ: ${TZ}
+      XRAY_VMESS_AEAD_FORCED: "false"
+      XUI_ENABLE_FAIL2BAN: "true"
+    # Reality's fallback target is traefik:8443, so Xray needs Traefik up.
+    # Not a hard dependency (different compose project) - restart policy covers it.
+    labels:
+      - "traefik.enable=true"
+
+      # ── admin panel: its own hostname, never touched by family clients ────
+      - "traefik.http.routers.xui-panel.entrypoints=websecure"
+      - "traefik.http.routers.xui-panel.rule=Host(`${PANEL_DOMAIN}`) && PathPrefix(`${PANEL_PATH}`)"
+      - "traefik.http.routers.xui-panel.service=xui-panel-svc"
+      - "traefik.http.services.xui-panel-svc.loadbalancer.server.port=2053"
+
+      # ── subscriptions ─────────────────────────────────────────────────────
+      - "traefik.http.routers.xui-sub.entrypoints=websecure"
+      # Subscriptions live on PUBLIC_DOMAIN, not the admin hostname. The
+      # AmneziaWG client config takes its Endpoint from whatever host the
+      # subscription was fetched from, and externalProxy does not override it -
+      # so serving subs from PANEL_DOMAIN would put the admin hostname into
+      # every user's config. Users then only ever see one hostname.
+      - "traefik.http.routers.xui-sub.rule=Host(`${PUBLIC_DOMAIN}`) && (PathPrefix(`${SUB_PATH}`) || PathPrefix(`${JSON_PATH}`))"
+      - "traefik.http.routers.xui-sub.priority=100"
+      - "traefik.http.routers.xui-sub.service=xui-sub-svc"
+      - "traefik.http.services.xui-sub-svc.loadbalancer.server.port=2096"
+
+      # ── trojan over httpupgrade, hiding under the decoy's own hostname ────
+      # Higher priority than the decoy router so this path wins.
+      - "traefik.http.routers.trojan-hu.entrypoints=websecure"
+      - "traefik.http.routers.trojan-hu.rule=Host(`${PUBLIC_DOMAIN}`) && PathPrefix(`${TROJAN_PATH}`)"
+      - "traefik.http.routers.trojan-hu.priority=100"
+      - "traefik.http.routers.trojan-hu.service=trojan-hu-svc"
+      - "traefik.http.services.trojan-hu-svc.loadbalancer.server.port=12812"

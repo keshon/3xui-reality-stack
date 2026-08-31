@@ -1,0 +1,14 @@
+# Default certificate for connections that arrive with no SNI (bare IP scans).
+# Without this Traefik serves its built-in self-signed "TRAEFIK DEFAULT CERT",
+# which is a loud "this is not a normal web server" signal to anyone scanning.
+# Populated by the certs-dumper sidecar once ACME has issued.
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certs/certs/CERT_BASENAME.crt
+        keyFile: /certs/private/CERT_BASENAME.key
+  options:
+    default:
+      minVersion: VersionTLS12
+      sniStrict: false

@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Idempotent first-run setup. Safe to re-run.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+[ -f .env ] || { echo "!! copy .env.example to .env and fill it in first"; exit 1; }
+
+# Load .env WITHOUT sourcing it. Sourcing runs the file as shell, so any value
+# containing '$' - an apr1/bcrypt password hash, for instance - gets expanded
+# as a variable and either mangles the value or aborts under `set -u`.
+while IFS= read -r line || [ -n "$line" ]; do
+  case "$line" in ''|'#'*) continue;; *'='*) ;; *) continue;; esac
+  k=${line%%=*}; v=${line#*=}
+  case "$v" in '"'*'"') v=${v#\"}; v=${v%\"};; "'"*"'") v=${v#'}; v=${v%'};; esac
+  export "$k=$v"
+done < .env
+
+# Fixed subnet so Traefik's proxyProtocol trustedIPs is deterministic.
+if ! docker network inspect proxy >/dev/null 2>&1; then
+  echo ">> creating docker network 'proxy' (${PROXY_SUBNET})"
+  docker network create --subnet "${PROXY_SUBNET}" proxy
+else
+  echo ">> network 'proxy' already exists"
+  echo "   subnet: $(docker network inspect proxy -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}')"
+  echo "   (must match PROXY_SUBNET=${PROXY_SUBNET}; recreate it if not)"
+fi
+
+# traefik's file provider does not expand env vars - render the template
+sed "s/CERT_BASENAME/${CERT_BASENAME}/g" traefik/dynamic/tls.yml.tmpl > traefik/dynamic/tls.yml
+
+mkdir -p traefik/data/logs traefik/data/acme shared/certs xui/db
+[ -f traefik/data/acme/acme.json ] || : > traefik/data/acme/acme.json
+chmod 600 traefik/data/acme/acme.json
+
+# HTTP-01 and DNS-01 are separate compose files rather than an override,
+# because compose REPLACES a command list instead of merging it.
+if [ "${ACME_MODE:-dns}" = "dns" ]; then
+  TRAEFIK_FILE=docker-compose.dns01.yml
+  [ -n "${CF_DNS_API_TOKEN:-}" ] || { echo "!! ACME_MODE=dns but CF_DNS_API_TOKEN is empty"; exit 1; }
+else
+  TRAEFIK_FILE=docker-compose.yml
+fi
+echo ">> acme mode: ${ACME_MODE:-dns}  (traefik/${TRAEFIK_FILE})"
+
+echo
+echo ">> starting: traefik -> decoy -> xui"
+( cd traefik && docker compose -f "$TRAEFIK_FILE" --env-file ../.env up -d )
+for d in decoy xui; do
+  ( cd "$d" && docker compose --env-file ../.env up -d )
+done
+
+echo
+echo ">> containers up. install.sh continues from here; if you ran bootstrap.sh"
+echo "   directly, wait for the wildcard cert then provision the lanes:"
+echo "     ls shared/certs/certs/"
+echo "     python3 scripts/provision-inbounds.py     # see docs/gotchas.md first"

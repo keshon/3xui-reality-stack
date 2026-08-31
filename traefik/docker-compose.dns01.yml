@@ -1,0 +1,116 @@
+name: traefik
+
+# DNS-01 / wildcard variant. Selected by ACME_MODE=dns in .env.
+# Keep in sync with docker-compose.yml (HTTP-01 variant).
+
+networks:
+  proxy:
+    external: true
+
+services:
+  traefik:
+    image: traefik:v3.7.12          # pinned. never :latest on a box you care about.
+    container_name: traefik
+    restart: always
+    networks: [proxy]
+    ports:
+      # NOTE: :443/tcp is deliberately NOT here any more - Xray owns it.
+      #       :443/udp is Hysteria2.
+      - "80:80"                     # ACME http-01 + redirect to https
+      # keep whatever extra TCP/UDP ports you actually use, e.g. amnezia/wg:
+      # - "51227:51227/udp"
+    environment:
+      TZ: ${TZ}
+      # Cloudflare API token, scoped to Zone:DNS:Edit on this zone only.
+      # Create at: dash.cloudflare.com -> My Profile -> API Tokens
+      CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN}
+    command:
+      - "--global.checknewversion=false"
+      - "--global.sendanonymoususage=false"
+
+      # ── entrypoints ──────────────────────────────────────────────────────
+      - "--entrypoints.web.address=:80"
+      # to=:443 (the PUBLIC port, owned by Xray) not to=websecure, which would
+      # redirect visitors to :8443 - the internal port they cannot reach.
+      # There is no ".port" field in Traefik v3; "to" takes the port itself.
+      - "--entrypoints.web.http.redirections.entrypoint.to=:443"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+
+      # INTERNAL https entrypoint. Not published to the host. Only Xray dials it.
+      - "--entrypoints.websecure.address=:8443"
+      - "--entrypoints.websecure.http.tls=true"
+      - "--entrypoints.websecure.http.tls.certresolver=le"
+      # TLS is configured ONLY here, never on individual routers: a router-level
+      # tls.certresolver overrides this block, and the wildcard below would be
+      # silently ignored (you get one cert per hostname instead).
+      - "--entrypoints.websecure.http.tls.domains[0].main=${BASE_DOMAIN}"
+      - "--entrypoints.websecure.http.tls.domains[0].sans=*.${BASE_DOMAIN}"
+      # Xray sends PROXY protocol v2 (realitySettings.xver=2) so real client IPs
+      # survive into the access log. MUST match xver on the Reality inbound:
+      #   xver=2 here  <->  proxyProtocol trusted below
+      #   xver=0       <->  delete these two lines
+      - "--entrypoints.websecure.proxyProtocol.trustedIPs=${PROXY_SUBNET}"
+      - "--entrypoints.websecure.forwardedHeaders.trustedIPs=${PROXY_SUBNET}"
+      # THE FIX for 10-second tunnels: no timeouts on long-lived proxy streams.
+      # Traefik v3 defaults readTimeout=60s / idleTimeout=180s, which guillotines
+      # httpupgrade and xhttp stream-up sessions.
+      - "--entrypoints.websecure.transport.respondingTimeouts.readTimeout=0"
+      - "--entrypoints.websecure.transport.respondingTimeouts.writeTimeout=0"
+      - "--entrypoints.websecure.transport.respondingTimeouts.idleTimeout=0"
+      - "--entrypoints.websecure.transport.lifeCycle.graceTimeOut=30s"
+
+      # ── providers ────────────────────────────────────────────────────────
+      - "--providers.docker=true"
+      - "--providers.docker.endpoint=unix:///var/run/docker.sock"
+      - "--providers.docker.network=proxy"
+      - "--providers.docker.exposedByDefault=false"
+      - "--providers.file.directory=/dynamic"
+      - "--providers.file.watch=true"
+
+      # ── acme ─────────────────────────────────────────────────────────────
+      - "--certificatesresolvers.le.acme.email=${LETSENCRYPT_EMAIL}"
+      - "--certificatesresolvers.le.acme.storage=/acme/acme.json"
+      # DNS-01 instead of HTTP-01, so we can issue a WILDCARD.
+      # Why: every cert you issue is public in Certificate Transparency logs.
+      # Per-subdomain certs let anyone enumerate your whole infrastructure at
+      # crt.sh. One wildcard leaks only the zone name and "*.zone", and lets
+      # you rotate the tunnel hostname in seconds without a new CT entry.
+      - "--certificatesresolvers.le.acme.dnschallenge=true"
+      - "--certificatesresolvers.le.acme.dnschallenge.provider=cloudflare"
+      - "--certificatesresolvers.le.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53"
+
+      # ── api / logs ───────────────────────────────────────────────────────
+      - "--api.dashboard=true"
+      - "--api.insecure=false"      # was true. that exposed the API on :8080.
+      - "--log.level=INFO"
+      - "--log.filepath=/logs/traefik.log"
+      - "--accesslog=true"
+      - "--accesslog.filepath=/logs/access.log"
+      - "--accesslog.bufferingsize=100"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./data/logs:/logs
+      - ./data/acme:/acme
+      - ./dynamic:/dynamic:ro
+      - ../shared/certs:/certs:ro   # for the default cert in dynamic/tls.yml
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.rule=Host(`${TOOLS_DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.middlewares=dashboard-auth"
+      - "traefik.http.middlewares.dashboard-auth.basicauth.users=${DASHBOARD_AUTH}"
+
+  # Extracts LE certs from acme.json onto disk so Hysteria2 can read them.
+  # Own script rather than ldez/traefik-certs-dumper: that project is
+  # unmaintained and panics on Traefik 3.7 acme.json ("unsupported key type").
+  certs-dumper:
+    image: python:3.13-alpine
+    container_name: traefik-certs-dumper
+    restart: unless-stopped
+    depends_on: [traefik]
+    command: python3 -u /dump-certs.py
+    volumes:
+      - ./dump-certs.py:/dump-certs.py:ro
+      - ./data/acme:/acme:ro
+      - ../shared/certs:/certs

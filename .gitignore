@@ -1,0 +1,23 @@
+# secrets and generated state - never commit
+.env
+users.txt
+CLIENT-CREDENTIALS.txt
+CLIENT-LINKS.txt
+
+# runtime data
+traefik/data/
+traefik/dynamic/tls.yml
+shared/certs/
+xui/db/
+decoy/site/*.local.*
+
+# rendered from templates
+hysteria/config.yaml
+
+# scratch / research material, not part of the stack
+tmp/
+
+# editors / os
+*.swp
+*~
+.DS_Store

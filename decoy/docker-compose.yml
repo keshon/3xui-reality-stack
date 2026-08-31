@@ -1,0 +1,40 @@
+name: decoy
+
+networks:
+  proxy:
+    external: true
+
+services:
+  # The site that lives at PUBLIC_DOMAIN.
+  #
+  # This is load-bearing, not decoration. It is:
+  #   - what realitySettings.target resolves to for any non-Reality client
+  #   - what an active prober sees
+  #   - what Hysteria2 masquerades as on udp/443
+  #   - the catch-all for unknown Host headers and bare-IP scans
+  #
+  # nginx (not Traefik's 404) so a probe gets a real page with real headers.
+  decoy:
+    image: nginx:1.29-alpine
+    container_name: decoy
+    restart: unless-stopped
+    networks: [proxy]
+    volumes:
+      - ./site:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    labels:
+      - "traefik.enable=true"
+
+      # the public hostname
+      - "traefik.http.routers.decoy.entrypoints=websecure"
+      - "traefik.http.routers.decoy.rule=Host(`${PUBLIC_DOMAIN}`)"
+      - "traefik.http.routers.decoy.priority=1"          # lowest: tunnel paths win
+      - "traefik.http.routers.decoy.service=decoy-svc"
+
+      # catch-all: anything with an unknown/absent Host lands here instead of 404
+      - "traefik.http.routers.decoy-catchall.entrypoints=websecure"
+      - "traefik.http.routers.decoy-catchall.rule=PathPrefix(`/`)"
+      - "traefik.http.routers.decoy-catchall.priority=0"
+      - "traefik.http.routers.decoy-catchall.service=decoy-svc"
+
+      - "traefik.http.services.decoy-svc.loadbalancer.server.port=80"
