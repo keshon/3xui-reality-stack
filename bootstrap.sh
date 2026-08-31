@@ -20,9 +20,18 @@ if ! docker network inspect proxy >/dev/null 2>&1; then
   echo ">> creating docker network 'proxy' (${PROXY_SUBNET})"
   docker network create --subnet "${PROXY_SUBNET}" proxy
 else
-  echo ">> network 'proxy' already exists"
-  echo "   subnet: $(docker network inspect proxy -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}')"
-  echo "   (must match PROXY_SUBNET=${PROXY_SUBNET}; recreate it if not)"
+  have=$(docker network inspect proxy -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}')
+  echo ">> network 'proxy' already exists (${have})"
+  # This is not cosmetic. Traefik trusts PROXY protocol v2 only from
+  # PROXY_SUBNET, and Xray prepends that header on every fallback connection.
+  # If the two disagree, Traefik reads the header as a malformed request and
+  # every non-Reality connection - the decoy, the panel, every other site on
+  # this box - fails. install.sh adopts the real value; refuse to guess.
+  if [ "$have" != "${PROXY_SUBNET}" ]; then
+    echo "!! PROXY_SUBNET=${PROXY_SUBNET} does not match it."
+    echo "   Set PROXY_SUBNET=${have} in .env, or recreate the network."
+    exit 1
+  fi
 fi
 
 # traefik's file provider does not expand env vars - render the template

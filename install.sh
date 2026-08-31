@@ -97,19 +97,49 @@ if ! command -v docker >/dev/null 2>&1; then
   curl -fsSL https://get.docker.com | sh >/dev/null 2>&1 || die "docker install failed"
 fi
 ok "docker $(docker --version | awk '{print $3}' | tr -d ,)"
-command -v openssl >/dev/null || { apt-get -qq update >/dev/null; apt-get -qq -y install openssl >/dev/null; }
+# `wg` generates the AmneziaWG server keypair (scripts/add-amneziawg.py). It is
+# not present by default on a minimal Ubuntu, and without it the keypair comes
+# back as two empty strings - which the panel accepts and then cannot run.
+MISSING=""
+for c in openssl wg; do command -v "$c" >/dev/null || MISSING="$MISSING $c"; done
+if [ -n "$MISSING" ]; then
+  apt-get -qq update >/dev/null 2>&1 || true
+  for c in $MISSING; do
+    case "$c" in wg) pkg=wireguard-tools;; *) pkg=$c;; esac
+    apt-get -qq -y install "$pkg" >/dev/null 2>&1 || warn "could not install $pkg"
+  done
+fi
+command -v wg >/dev/null && ok "wireguard-tools present"   || warn "no 'wg' binary - the amneziawg lane will be skipped"
 bash scripts/host-tune.sh >/dev/null 2>&1 || warn "host-tune.sh reported a problem"
 ok "congestion control: $(sysctl -n net.ipv4.tcp_congestion_control)"
 
 if command -v ufw >/dev/null 2>&1; then
-  for p in 22/tcp 80/tcp 443/tcp 443/udp "${MTPROTO_PORT}/tcp" "${AWG_PORT}/udp"; do ufw allow "$p" >/dev/null 2>&1 || true; done
+  # Find the port sshd is ACTUALLY on. Enabling ufw with a hardcoded 22/tcp on
+  # a host whose sshd moved locks you out of it, and the next thing this script
+  # does is restart the networking stack.
+  SSH_PORTS="$(ss -lntp 2>/dev/null | awk '/sshd/ {n=split($4,a,":"); print a[n]}' | sort -un)"
+  SSH_PORTS="${SSH_PORTS:-$(awk '/^[[:space:]]*Port[[:space:]]+[0-9]+/{print $2}' /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null | sort -un)}"
+  SSH_PORTS="${SSH_PORTS:-22}"
+  for p in $SSH_PORTS; do ufw allow "${p}/tcp" >/dev/null 2>&1 || true; done
+  for p in 80/tcp 443/tcp 443/udp "${MTPROTO_PORT}/tcp" "${AWG_PORT}/udp"; do ufw allow "$p" >/dev/null 2>&1 || true; done
   ufw --force enable >/dev/null 2>&1 || true
-  ok "ufw: 22, 80, 443/tcp, 443/udp, ${MTPROTO_PORT}/tcp, ${AWG_PORT}/udp"
+  ok "ufw: ssh $(echo $SSH_PORTS | tr '
+' ' '), 80, 443/tcp, 443/udp, ${MTPROTO_PORT}/tcp, ${AWG_PORT}/udp"
 fi
 warn "if your provider has its own firewall, open the same ports there - 443/udp especially"
 
 # ── 4. bring the stack up ───────────────────────────────────────────────────
 say "stack"
+# The 'proxy' network usually already exists on a host that was running
+# something behind a reverse proxy. Its subnet is exactly what Traefik trusts
+# for PROXY protocol v2, so take the real value rather than leaving a guess in
+# .env: if the two disagree, Traefik rejects the PROXY header Xray prepends and
+# EVERY fallback request dies - the decoy, the panel, and any other site here.
+EXISTING="$(docker network inspect proxy -f '{{range .IPAM.Config}}{{.Subnet}}{{end}}' 2>/dev/null || true)"
+if [ -n "$EXISTING" ] && [ "$EXISTING" != "$PROXY_SUBNET" ]; then
+  set_env PROXY_SUBNET "$EXISTING"
+  ok "adopted the existing 'proxy' subnet: $EXISTING"
+fi
 ./bootstrap.sh
 
 say "certificate"
