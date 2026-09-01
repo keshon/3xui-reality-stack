@@ -38,7 +38,12 @@ import time
 
 from panel import ROOT, Panel, env_file, xray_healthy
 
-TAG = "xray-stack-"
+# Prefix on every ruleTag this script owns, so a re-apply replaces its own
+# rules and leaves hand-written ones alone. OLD_TAGS keeps earlier prefixes
+# recognisable: the tags live in the deployed Xray config, so renaming the
+# project must not orphan the rules already installed on a running server.
+TAG = "3xui-stack-"
+OLD_TAGS = ("xray-stack-",)
 
 # Blocked in Russia -> must always go through the tunnel. Listed first so a
 # later rule cannot reclassify them.
@@ -107,7 +112,9 @@ def validate(p, tokens, kind):
 
 
 def strip_ours(rules):
-    return [r for r in rules if not str(r.get("ruleTag", "")).startswith(TAG)]
+    known = (TAG,) + OLD_TAGS
+    return [r for r in rules
+            if not str(r.get("ruleTag", "")).startswith(known)]
 
 
 # (what, kind, expected outbound). Reading the rule list proves the rules were
@@ -303,7 +310,7 @@ def main():
     rules[:] = strip_ours(rules)
 
     if "--remove" in sys.argv:
-        print("removed the xray-stack routing rules")
+        print("removed this script's routing rules")
     else:
         ps, bad_ps = validate(p, PROXY_SITE, "site")
         pi, bad_pi = validate(p, PROXY_IP, "ip")

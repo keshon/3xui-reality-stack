@@ -1,4 +1,4 @@
-# xray-stack
+# 3xui-reality-stack
 
 A one-command, self-hosted proxy stack: **Xray owns `:443`, and the reverse
 proxy sits behind it.** Five transports, one account per person, one
@@ -74,7 +74,8 @@ page, not a 404 and not a default self-signed certificate.
 ## Install
 
 ```bash
-git clone <this repo> /opt/xray-stack && cd /opt/xray-stack
+git clone https://github.com/keshon/3xui-reality-stack.git /opt/3xui-reality-stack
+cd /opt/3xui-reality-stack
 cp .env.example .env
 cp users.txt.example users.txt
 $EDITOR .env          # domains, email, Cloudflare token
