@@ -83,13 +83,17 @@ $EDITOR users.txt     # one account per line
 sudo ./install.sh
 ```
 
-Before the first run, **replace the contents of `decoy/site/`**. That site is
-load-bearing, not decoration: it is what Reality's fallback serves, what an
-active prober sees, what Hysteria2 masquerades as, and what unknown-host and
-bare-IP scans get. The shipped pages are placeholder prose, and a site that
-reads as filler undoes the rest of the design. A static export of anything you
-genuinely have works; what matters is that it does not look synthetic and stops
-changing once deployed.
+Before the first run, **put your own site in `decoy/site/`**. `bootstrap.sh`
+seeds it from `decoy/site.example/` so the stack comes up, but that seed is
+placeholder prose and must not survive contact with the internet.
+
+The decoy is load-bearing, not decoration: it is what Reality's fallback
+serves, what an active prober sees, what Hysteria2 masquerades as, and what
+unknown-host and bare-IP scans get. It is also **per-deployment on purpose** —
+`decoy/site/` is gitignored — because a site identical across every install
+would identify all of them at once, which is the one thing it exists to
+prevent. A static export of something you genuinely have works; what matters is
+that it does not read as filler and stops changing once deployed.
 
 `install.sh` is idempotent — re-run it after editing `.env`. It generates any
 secrets you left blank and writes them back, installs Docker if missing, tunes
@@ -194,7 +198,7 @@ bootstrap.sh              compose orchestration (idempotent)
 .env.example              every setting, documented inline; copy to .env
 users.txt.example         the account list; copy to users.txt
 traefik/                  reverse proxy, ACME, cert extraction
-decoy/                    the site that fronts everything
+decoy/                    nginx + site.example/; your real site is gitignored
 xui/                      3x-ui + Xray
 scripts/
   panel.py                3x-ui API client (all the quirks live here)

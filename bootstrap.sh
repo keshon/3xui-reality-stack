@@ -37,6 +37,17 @@ fi
 # traefik's file provider does not expand env vars - render the template
 sed "s/CERT_BASENAME/${CERT_BASENAME}/g" traefik/dynamic/tls.yml.tmpl > traefik/dynamic/tls.yml
 
+# Seed the decoy site if it is not there yet. It is deliberately not in the
+# repo: an identical site on every deployment would identify all of them at
+# once, which is precisely what it exists to prevent.
+if [ ! -e decoy/site/index.html ]; then
+  mkdir -p decoy/site
+  cp -r decoy/site.example/. decoy/site/
+  echo "!! decoy/site/ seeded from the example - REPLACE IT before this is"
+  echo "   reachable. It is what probes, bare-IP scans and Reality's fallback"
+  echo "   all see, and the shipped pages are placeholder prose."
+fi
+
 mkdir -p traefik/data/logs traefik/data/acme shared/certs xui/db
 [ -f traefik/data/acme/acme.json ] || : > traefik/data/acme/acme.json
 chmod 600 traefik/data/acme/acme.json

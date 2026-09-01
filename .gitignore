@@ -11,7 +11,11 @@ traefik/data/
 traefik/dynamic/tls.yml
 shared/certs/
 xui/db/
-decoy/site/*.local.*
+# The decoy site is per-deployment on purpose. If every install served the
+# same pages, the pages themselves would identify the install - the one thing
+# the decoy exists to prevent. decoy/site.example/ is the seed; the real one
+# is yours and is never committed.
+decoy/site/
 
 # rendered from templates
 hysteria/config.yaml
