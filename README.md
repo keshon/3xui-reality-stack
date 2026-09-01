@@ -151,8 +151,9 @@ sudo ./install.sh
 # (removing a line only stops re-creation; delete the client in the panel
 #  to actually revoke access)
 
-# after ANY panel edit to the hysteria inbound (3x-ui strips a required field)
-python3 scripts/provision-inbounds.py --repair-hysteria && docker restart 3x-ui
+# bring stored inbounds back in line after editing anything in the panel UI
+# (it drops fields it does not model - see docs/gotchas.md)
+python3 scripts/provision-inbounds.py --reconcile
 
 # rotate the tunnel hostname (wildcard cert means no new CT entry)
 #   1. add an A record for the new name

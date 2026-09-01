@@ -162,20 +162,27 @@ Xray's hysteria inbound needs **two** integer `version` fields:
                     "hysteriaSettings": { "version": 2 } }
 ```
 
-3x-ui v3.7 does not model `settings.version`, so it drops the field on **every
-save — including when you merely open and save the inbound in the panel UI.**
-Xray then dies with:
+3x-ui does not model `settings.version` in its web UI, so it drops the field
+whenever you open and save the inbound there. Historically Xray then died with
 
 ```
 proxy/hysteria: not hysteria transport
 ```
 
-and takes every other lane with it. After any panel edit to a hysteria inbound:
+and took every other lane with it.
+
+**On v3.7 that is survivable.** The panel now re-inserts the field when it
+generates the Xray config — `HealHysteriaVersion` sets it unconditionally, for
+both `settings` and `streamSettings.hysteriaSettings` — so a stripped value can
+no longer stop the core. The stored row is still wrong, which matters if you
+ever read it back or move to a panel without that healing:
 
 ```bash
 python3 scripts/provision-inbounds.py --repair-hysteria
-docker restart 3x-ui
 ```
+
+No restart needed: the reconciler goes through the panel API, and the panel
+restarts Xray itself after an inbound update.
 
 `network: "hysteria"` in streamSettings is also mandatory — without it you get
 the same "not hysteria transport" error.
