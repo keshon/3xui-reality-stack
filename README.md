@@ -1,14 +1,13 @@
 # 3xui-reality-stack
 
-A one-command, self-hosted proxy stack: **Xray owns `:443`, and the reverse
-proxy sits behind it.** Five transports, one account per person, one
-subscription URL each, and a real website as cover.
+Deploys 3x-ui with Xray owning `:443` and the reverse proxy behind it, rather
+than the other way round. Five transports share the port, each person gets one
+account and one subscription URL, and a real website sits in front of all of it.
 
-It is built for a handful of people you know — a household, a few friends —
-where you control the server and the domain, and want the thing to keep working
-without anyone becoming an administrator. It is not a multi-tenant service:
-there is no billing, no signup, no quota enforcement, and accounts are added by
-editing a text file and re-running the installer.
+I set this up for my own household, so the defaults follow from that. Accounts
+are a list in a text file; adding someone is one line and another run of the
+installer. Nothing is metered and there is no signup page, because I never
+needed either.
 
 ```
 :443/tcp ──> Xray (VLESS + Reality + Vision)
@@ -36,25 +35,32 @@ your own sites behind it, see [docs/other-apps.md](docs/other-apps.md).
 
 ## Why this shape
 
-**Reality must own the socket.** XTLS-Vision's whole job is making the record
-layer match a browser. Behind a TCP passthrough the proxy reassembles and
-re-emits the stream through its own buffers, destroying the packet sizing
-Vision constructs — you pay its cost and get none of its benefit.
+### Reality has to own the socket
 
-**Reality falls back to your own reverse proxy.** `target: traefik:8443` with
-`serverNames: [PUBLIC_DOMAIN]`, where that name really resolves here and really
-has a Let's Encrypt certificate and a real site. DNS, certificate and content
-all agree, so probing gets a coherent answer. Pointing `target` at a third
-party makes the fallback hand out *their* certificate for *your* SNI — a
-one-connection giveaway. See [docs/reality.md](docs/reality.md).
+XTLS-Vision's job is making the record layer match a browser. Put a TCP
+passthrough in front of it and the proxy reassembles the stream through its own
+buffers, which destroys the packet sizing Vision spent the effort constructing.
+You pay for Vision and get nothing back.
 
-**One wildcard certificate.** Every certificate you issue is public in
-Certificate Transparency logs, so per-hostname certs let anyone enumerate your
-infrastructure at `crt.sh`. A wildcard leaks only the zone name — and lets you
-rotate the tunnel hostname in seconds with no new CT entry.
+### The fallback points at your own proxy
 
-**A real site at the catch-all.** Unknown Host headers and bare-IP scans get a
-page, not a 404 and not a default self-signed certificate.
+`target: traefik:8443` with `serverNames: [PUBLIC_DOMAIN]`, where that name
+resolves here, holds a Let's Encrypt certificate, and serves a real site. All
+three agree, so a probe gets a coherent answer. Point `target` at a third party
+instead and the fallback hands out their certificate for your SNI, which
+identifies the server in one connection. See [docs/reality.md](docs/reality.md).
+
+### One wildcard certificate
+
+Certificates are published in Certificate Transparency logs, so a certificate
+per hostname lets anyone list your infrastructure from `crt.sh`. A wildcard
+leaks the zone name and nothing else, and it lets you rotate the tunnel
+hostname without creating a new CT entry.
+
+### A real site at the catch-all
+
+Unknown Host headers and bare-IP scans get a page. Not a 404, and not a
+self-signed default certificate.
 
 ## Requirements
 
@@ -63,8 +69,8 @@ page, not a 404 and not a default self-signed certificate.
 - A domain whose DNS is on Cloudflare, and an API token scoped to
   **Zone → DNS → Edit** on that one zone. DNS-01 is what issues the wildcard.
 - A records for `PUBLIC_DOMAIN` and `PANEL_DOMAIN` pointing at the server,
-  **DNS-only — grey cloud, not orange.** A CDN proxy terminates TLS
-  and does not forward UDP, which breaks every lane at once and looks like a
+  **DNS-only: grey cloud, not orange.** A CDN proxy terminates TLS and does
+  not forward UDP. That breaks every lane at once, and it looks like a
   configuration bug rather than a DNS setting.
 - Ports open in **your provider's firewall**, which is separate from the host's
   own. `443/udp` is the one most often closed by default, and Hysteria2 then
@@ -82,33 +88,36 @@ $EDITOR users.txt     # one account per line
 sudo ./install.sh
 ```
 
-Before the first run, **put your own site in `decoy/site/`**. `bootstrap.sh`
-seeds it from `decoy/site.example/` so the stack comes up, but that seed is
-placeholder prose and must not survive contact with the internet.
+Before the first run, put your own site in `decoy/site/`. `bootstrap.sh` seeds
+it from `decoy/site.example/` so the stack comes up, but that seed is
+placeholder prose and should not survive contact with the internet.
 
-The decoy is load-bearing, not decoration: it is what Reality's fallback
-serves, what an active prober sees, what Hysteria2 masquerades as, and what
-unknown-host and bare-IP scans get. It is also **per-deployment on purpose** —
-`decoy/site/` is gitignored — because a site identical across every install
-would identify all of them at once, which is the one thing it exists to
-prevent. A static export of something you genuinely have works; what matters is
-that it does not read as filler and stops changing once deployed.
+The decoy is load-bearing rather than decoration. Reality's fallback serves it,
+Hysteria2 masquerades as it, and anything arriving with an unknown Host header
+ends up there. `decoy/site/` is gitignored on purpose: if every install served
+the same pages, the pages would identify every install. A static export of
+something you actually have is fine. What matters is that it doesn't read as
+filler, and that it stops changing once deployed.
 
-`install.sh` is idempotent — re-run it after editing `.env`. It generates any
-secrets you left blank and writes them back, installs Docker if missing, tunes
-the kernel, opens the firewall, brings up the stack, waits for the wildcard
-certificate, provisions every lane, collapses the accounts, verifies the result,
-and prints one subscription URL per person. Most of the wait is DNS-01
-propagation. If a check fails it stops there rather than continuing into a
-broken state.
+`install.sh` is idempotent; re-run it after editing `.env`. In order, it:
 
-Give one person the subscription for a day before handing it to everyone. A
-single clear report beats five people describing different symptoms.
+- fills in any secrets you left blank and writes them back to `.env`
+- checks the hostnames resolve here before going anywhere near ACME
+- installs Docker if missing, tunes the kernel, opens the firewall
+- brings the stack up and waits for the wildcard certificate
+- provisions the lanes and collapses per-lane clients into one account each
+- verifies the result and prints a subscription URL per person
+
+Most of the wait is DNS-01 propagation. A failed check stops the run instead of
+continuing into a broken state.
+
+Hand the subscription to one person for a day before giving it to everyone.
+Debugging one report is a great deal easier than debugging five.
 
 ## Configuration
 
 Everything lives in `.env`, which is documented inline in
-[`.env.example`](.env.example). The values worth knowing about:
+[`.env.example`](.env.example). The ones that matter:
 
 | Setting | What it decides |
 |---|---|
@@ -118,10 +127,10 @@ Everything lives in `.env`, which is documented inline in
 | `AWG_MTU` | Tunnel MTU written into every AmneziaWG client config. Defaults to 1280. Too high does not fail cleanly — small requests fit and large ones stall. |
 | `AWG_PORT` | Not 51820. The AmneziaWG payload is obfuscated; the port number is not. |
 
-Account names are `a-z`, `0-9` and `_`, up to 24 characters — no `-`, because
-client emails are namespaced per lane as `r-<name>` / `t-<name>` / `h-<name>`
-and the consolidation step splits on the first `-` to recover the person. Check
-a list without deploying:
+Account names are `a-z`, `0-9` and `_`, up to 24 characters. No `-`: client
+emails are namespaced per lane as `r-<name>` / `t-<name>` / `h-<name>`, and the
+consolidation step splits on the first `-` to recover the person. Check a list
+without deploying:
 
 ```bash
 python3 scripts/resolve-users.py --list
@@ -141,9 +150,9 @@ Hand out one subscription URL per person; it carries every lane and updates
 itself. Which lane to actually use, and what it means when one stops, is in
 [docs/choosing-a-lane.md](docs/choosing-a-lane.md).
 
-AmneziaWG is the exception worth knowing about. It rides in the subscription as
-a `vpn://` entry, which only the Amnezia clients understand — Happ, v2rayN and
-Hiddify skip it silently, so the lane looks absent. `scripts/client-links.py`
+AmneziaWG behaves differently from the rest. It rides in the subscription as a
+`vpn://` entry, and only the Amnezia clients understand that scheme; Happ,
+v2rayN and Hiddify skip the line silently, so the lane looks absent. `scripts/client-links.py`
 decodes it back into an ordinary WireGuard-style `.conf` for the AmneziaWG app.
 
 ## Operating
@@ -215,9 +224,9 @@ scripts/
 
 ## Not included
 
-**Plain WireGuard.** Xray supports it, but the handshake is fixed-size with
-recognisable constants and is widely blocked. AmneziaWG — which *is* included —
-exists to fix exactly that, so use that instead.
+Plain WireGuard. Xray supports it, but its handshake is fixed-size with
+recognisable constants and is widely blocked. AmneziaWG exists to fix that and
+is included, so use it instead.
 
 ## License
 
