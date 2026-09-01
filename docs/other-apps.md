@@ -77,8 +77,8 @@ other. Two conditions:
   Cloudflare connect to `:80` instead, where the redirect to `https` sends it
   straight back — a redirect loop.
 * it must be an ordinary HTTP app. Cloudflare terminates TLS and does not
-  forward UDP, so `PUBLIC_DOMAIN`, `PANEL_DOMAIN` and `TOOLS_DOMAIN` must stay
-  **DNS-only**, grey cloud. Proxying those breaks every tunnel lane.
+  forward UDP, so `PUBLIC_DOMAIN` and `PANEL_DOMAIN` must stay **DNS-only**,
+  grey cloud. Proxying those breaks every tunnel lane.
 
 ## What not to put here
 

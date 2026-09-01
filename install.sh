@@ -62,11 +62,6 @@ NEW_CREDS=""
 [ -n "${JSON_PATH:-}"  ] || { set_env JSON_PATH  "/json-$(openssl rand -hex 6)";  ok "generated JSON_PATH"; }
 [ -n "${PANEL_USER:-}" ] || { set_env PANEL_USER "adm$(openssl rand -hex 3)"; NEW_CREDS=1; }
 if [ -z "${PANEL_PASS:-}" ]; then set_env PANEL_PASS "$(openssl rand -base64 15)"; NEW_CREDS=1; fi
-if [ -z "${DASHBOARD_AUTH:-}" ]; then
-  DASH_PW="$(openssl rand -base64 12)"
-  set_env DASHBOARD_AUTH "admin:$(openssl passwd -apr1 "$DASH_PW")"
-  ok "generated Traefik dashboard password: admin / ${DASH_PW}"
-fi
 : "${CERT_BASENAME:=$BASE_DOMAIN}"; set_env CERT_BASENAME "$CERT_BASENAME"
 : "${PROXY_SUBNET:=172.28.0.0/16}"; set_env PROXY_SUBNET "$PROXY_SUBNET"
 : "${MTPROTO_PORT:=8443}";          set_env MTPROTO_PORT "$MTPROTO_PORT"
@@ -84,7 +79,7 @@ python3 scripts/resolve-users.py --list | sed 's/^/   /'
 # ── 2. DNS must resolve here before ACME will work ──────────────────────────
 say "dns"
 MYIP="$(curl -fsS -m 10 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
-for h in "$PUBLIC_DOMAIN" "$PANEL_DOMAIN" ${TOOLS_DOMAIN:+$TOOLS_DOMAIN}; do
+for h in "$PUBLIC_DOMAIN" "$PANEL_DOMAIN"; do
   got="$(getent ahostsv4 "$h" 2>/dev/null | awk '{print $1; exit}')"
   if [ "$got" = "$MYIP" ]; then ok "$h -> $got"
   elif [ -z "$got" ];      then die "$h does not resolve. Add an A record to $MYIP first."

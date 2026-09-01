@@ -18,7 +18,6 @@ editing a text file and re-running the installer.
                                              ├── PUBLIC_DOMAIN/TROJAN_PATH -> trojan inbound
                                              ├── PUBLIC_DOMAIN/SUB_PATH   -> subscriptions
                                              ├── PANEL_DOMAIN             -> 3x-ui panel
-                                             ├── TOOLS_DOMAIN             -> dashboard
                                              └── catch-all                -> decoy site
 :443/udp ──> Xray Hysteria2 inbound (native since Xray 26.x)
 :MTPROTO_PORT ─> MTProto (mtg, FakeTLS) — run by 3x-ui, not by Xray
@@ -63,8 +62,8 @@ page, not a 404 and not a default self-signed certificate.
   the geo lists sit around 200 MB.
 - A domain whose DNS is on Cloudflare, and an API token scoped to
   **Zone → DNS → Edit** on that one zone. DNS-01 is what issues the wildcard.
-- A records for `PUBLIC_DOMAIN`, `PANEL_DOMAIN` and `TOOLS_DOMAIN` pointing at
-  the server, **DNS-only — grey cloud, not orange.** A CDN proxy terminates TLS
+- A records for `PUBLIC_DOMAIN` and `PANEL_DOMAIN` pointing at the server,
+  **DNS-only — grey cloud, not orange.** A CDN proxy terminates TLS
   and does not forward UDP, which breaks every lane at once and looks like a
   configuration bug rather than a DNS setting.
 - Ports open in **your provider's firewall**, which is separate from the host's

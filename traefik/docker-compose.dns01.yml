@@ -80,8 +80,13 @@ services:
       - "--certificatesresolvers.le.acme.dnschallenge.resolvers=1.1.1.1:53,8.8.8.8:53"
 
       # ── api / logs ───────────────────────────────────────────────────────
-      - "--api.dashboard=true"
-      - "--api.insecure=false"      # was true. that exposed the API on :8080.
+      # No API and no dashboard. Traefik's API is read-only, but it reports
+      # every router rule - which here means TROJAN_PATH, SUB_PATH, JSON_PATH
+      # and PANEL_PATH, the values install.sh generates precisely so they
+      # cannot be guessed. Publishing it puts one password in front of all of
+      # them. Read the running configuration from the host instead:
+      #     docker logs traefik
+      #     python3 scripts/routing.py --show
       - "--log.level=INFO"
       - "--log.filepath=/logs/traefik.log"
       - "--accesslog=true"
@@ -93,13 +98,6 @@ services:
       - ./data/acme:/acme
       - ./dynamic:/dynamic:ro
       - ../shared/certs:/certs:ro   # for the default cert in dynamic/tls.yml
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.dashboard.entrypoints=websecure"
-      - "traefik.http.routers.dashboard.rule=Host(`${TOOLS_DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
-      - "traefik.http.routers.dashboard.service=api@internal"
-      - "traefik.http.routers.dashboard.middlewares=dashboard-auth"
-      - "traefik.http.middlewares.dashboard-auth.basicauth.users=${DASHBOARD_AUTH}"
 
   # Extracts LE certs from acme.json onto disk so Hysteria2 can read them.
   # Own script rather than ldez/traefik-certs-dumper: that project is
