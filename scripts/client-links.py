@@ -15,7 +15,7 @@ is the only thing they need. This exists for the two cases it does not cover:
 Run on the server:
 
     python3 scripts/client-links.py                 # everyone, to stdout
-    python3 scripts/client-links.py keshon icehead  # just these
+    python3 scripts/client-links.py alice bob       # just these
     python3 scripts/client-links.py --write         # also CLIENT-LINKS.txt
     python3 scripts/client-links.py --awg-dir awg   # per-user .conf files
 """

@@ -197,7 +197,7 @@ def happ_profile(env):
         "DirectIp": HAPP_DIRECT_IP,
         # Deliberately no Geositeurl/Geoipurl override. Pointing Happ at the
         # runetfreedom build would make the category list match the server's
-        # exactly, but that file is ~73 MB - a lot to push onto seven phones
+        # exactly, but that file is ~73 MB - a lot to pull onto every phone
         # for the sake of the long tail. tld-ru plus category-ru covers .ru,
         # .su, .moscow, .tatar and the Cyrillic TLDs from the lists Happ
         # already ships.

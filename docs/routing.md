@@ -81,8 +81,8 @@ python3 scripts/routing.py --happ --apply   # install and verify the headers
 ```
 
 Everyone then gets it by re-adding their subscription. The profile sends
-`geosite:tld-ru`, `geosite:category-ru`, `geoip:ru` and this deployment's own
-zone to `direct`, and everything else through the tunnel. Field names and
+`geosite:tld-ru`, `geosite:category-ru`, `geoip:ru` and the server's own zone
+to `direct`, and everything else through the tunnel. Field names and
 types are Happ's own, not Xray's — booleans are the strings `"true"`/`"false"`
 ([spec](https://www.happ.su/main/dev-docs/routing)).
 
@@ -112,10 +112,10 @@ rule applies to it.
 
 ## Do not block your own zone
 
-`BASE_DOMAIN` here is `keshon.ru`, and `geosite:tld-ru` matches it. Left
-unhandled, the RU rules block the hostnames the whole deployment is *reached
-by*: the subscription URL, the panel, and the MTProto proxy's FakeTLS fronting
-name. A client already inside the tunnel then cannot reach the tunnel's own
+If `BASE_DOMAIN` sits inside a category you block — any `.ru` zone is matched
+by `geosite:tld-ru` — then the RU rules block the hostnames the deployment is
+*reached by*: the subscription URL, the panel, and the MTProto proxy's FakeTLS
+fronting name. A client already inside the tunnel then cannot reach the tunnel's own
 endpoints — subscription refreshes fail and the Telegram proxy hangs on
 connect, forever, with no error.
 

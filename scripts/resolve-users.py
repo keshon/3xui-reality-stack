@@ -6,7 +6,7 @@ the panel actually read. install.sh runs this and writes the answer back into
 USERS=, so the two can never disagree - and an unusable name is rejected here,
 before it becomes a half-provisioned account.
 
-    python3 scripts/resolve-users.py          # keshon,icehead,...
+    python3 scripts/resolve-users.py          # alice,bob,carol
     python3 scripts/resolve-users.py --list   # one per line, with the source
 """
 import sys

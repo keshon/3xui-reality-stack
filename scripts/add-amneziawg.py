@@ -92,8 +92,8 @@ def main():
         # (IP 20 + UDP 8 + header 16 + Poly1305 16); AmneziaWG 3.1 then adds up
         # to ~64 more of transport junk (S4), content padding and random
         # trailers. On a 1500-byte path that leaves ~1376, and access networks
-        # are rarely 1500 - a phone on this deployment advertised MSS 1394,
-        # i.e. a 1434-byte path, which leaves ~1310.
+        # are frequently smaller: a mobile path advertising MSS 1394 is a
+        # 1434-byte path, which leaves ~1310.
         #
         # Too-large packets do not fail cleanly. Small requests fit and work,
         # so the tunnel looks alive; anything that fills a packet stalls and

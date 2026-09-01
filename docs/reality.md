@@ -36,7 +36,7 @@ Instead, point `serverNames` at a domain that genuinely resolves to this
 server, and `target` at a local TLS terminator holding a real certificate for
 it and serving real content. DNS, certificate and content all agree.
 
-This deployment does that: `target: traefik:8443`, `serverNames:
+This stack does that: `target: traefik:8443`, `serverNames:
 [PUBLIC_DOMAIN]`, and a real static site behind it.
 
 Two bonuses:

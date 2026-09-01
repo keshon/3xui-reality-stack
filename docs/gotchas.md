@@ -27,6 +27,37 @@ docker logs --tail 40 3x-ui | grep -i 'failed to start'
 
 ---
 
+## A routing rule that is present but can never fire
+
+The panel's default template already carries
+
+```json
+{"type": "field", "protocol": ["bittorrent"], "outboundTag": "blocked"}
+```
+
+so the config reads as though torrents are blocked. They are not, unless
+**sniffing is enabled on the inbound**. Xray decides `protocol` by reading the
+first payload of a connection; with sniffing off there is nothing for the rule
+to match, and it silently never applies.
+
+This is the worst shape a gotcha can take — not a component refusing a
+configuration, but one accepting a configuration that *looks* enforced and
+does nothing. Nothing logs, and the rule is right there in the file.
+
+`provision-inbounds.py` enables sniffing with `routeOnly`, which supplies the
+routing decision without letting a sniffed name replace the address the client
+asked for:
+
+```bash
+python3 scripts/provision-inbounds.py --sniffing && docker restart 3x-ui
+```
+
+The same trap applies to any protocol-matching rule. Verify by asking Xray
+where it would actually send something rather than by reading the rules back —
+`scripts/routing.py --test` does that. See [routing.md](routing.md).
+
+---
+
 ## amneziawg: works, but only once two conditions are met
 
 Xray has no amneziawg implementation — put `protocol: amneziawg` into an Xray
