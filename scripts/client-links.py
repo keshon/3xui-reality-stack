@@ -18,14 +18,14 @@ Run on the server:
     python3 scripts/client-links.py alice bob       # just these
     python3 scripts/client-links.py --write         # also CLIENT-LINKS.txt
     python3 scripts/client-links.py --awg-dir awg   # per-user .conf files
+    python3 scripts/client-links.py --urls          # just the subscription URLs
 """
 import base64
 import os
-import sqlite3
 import sys
 import urllib.request
 
-from panel import DB_PATH, ROOT, container_ip, env_file
+from panel import ROOT, Panel, container_ip, env_file
 
 SCHEME_NAMES = {
     "vless://": "VLESS + Reality + Vision",
@@ -75,8 +75,15 @@ def main():
             args = [x for x in args if x != awg_dir]
 
     env = env_file()
-    con = sqlite3.connect(DB_PATH)
-    rows = list(con.execute("select email, sub_id from clients order by email"))
+    rows = sorted((c["email"], c.get("subId") or "")
+                  for c in Panel(env).login().clients() if c.get("email"))
+
+    if "--urls" in sys.argv:
+        for email, sub_id in rows:
+            print("    %-12s https://%s%s/%s"
+                  % (email, env["PUBLIC_DOMAIN"], env["SUB_PATH"], sub_id))
+        return
+
     if args:
         rows = [r for r in rows if r[0] in args]
     if not rows:

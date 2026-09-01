@@ -237,18 +237,16 @@ def install_happ(p, env, apply_it):
     time.sleep(14)
 
 
-def check_happ_headers(env):
+def check_happ_headers(p, env):
     """Confirm the headers really are on a subscription response."""
-    import sqlite3
     import urllib.request
-    from panel import DB_PATH, container_ip
-    row = sqlite3.connect(DB_PATH).execute(
-        "select sub_id from clients limit 1").fetchone()
-    if not row:
+    from panel import container_ip
+    subs = [c.get("subId") for c in p.clients() if c.get("subId")]
+    if not subs:
         print("  (no clients yet - nothing to check)")
         return
     url = "http://%s:2096%s/%s" % (container_ip(),
-                                   env["SUB_PATH"].rstrip("/"), row[0])
+                                   env["SUB_PATH"].rstrip("/"), subs[0])
     req = urllib.request.Request(url, headers={"Host": env["PUBLIC_DOMAIN"]})
     with urllib.request.urlopen(req, timeout=20) as resp:
         for h in ("Routing-Enable", "Routing"):
@@ -292,7 +290,7 @@ def main():
         install_happ(p, e, "--apply" in sys.argv)
         if "--apply" in sys.argv:
             print("\nheaders on a real subscription response:")
-            check_happ_headers(e)
+            check_happ_headers(p, e)
         return
 
     if "--test" in sys.argv:

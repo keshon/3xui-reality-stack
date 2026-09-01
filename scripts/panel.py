@@ -12,6 +12,10 @@ Everything the other scripts learned the hard way lives here:
     but come back already parsed when you read them.
   * On a client object, `id` is the UUID as a string - NOT the numeric row id.
     Sending the row id writes that number into `uuid` and destroys the account.
+  * Nothing here reads or writes x-ui.db. The schema is 3x-ui's private
+    business and has changed shape between releases; a write that bypasses the
+    panel also bypasses the validation that catches a bad inbound before it
+    becomes one that cannot start.
   * `allowedIPs` is returned as a comma-joined string but must be sent as a
     list, so a client object cannot be round-tripped verbatim.
 """
@@ -27,7 +31,6 @@ import uuid as uuidlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(ROOT, ".env")
-DB_PATH = os.path.join(ROOT, "xui", "db", "x-ui.db")
 
 
 def env_file(path=ENV_PATH):
@@ -217,6 +220,20 @@ class Panel:
             f[k] = v if isinstance(v, str) else json.dumps(v or {})
         f.update(overrides)
         return self.post(f"/panel/api/inbounds/update/{inbound['id']}", f)
+
+    def clients(self):
+        """Every client, as the panel sees them.
+
+        Carries email, subId, uuid, password, auth and inboundIds, which is
+        everything the scripts here used to read straight out of x-ui.db.
+        Preferred over the database: the schema is 3x-ui's private business and
+        has changed shape between releases, whereas this is the panel's own
+        published view of it.
+        """
+        return self.get("/panel/api/clients/list").get("obj") or []
+
+    def emails(self):
+        return [c["email"] for c in self.clients() if c.get("email")]
 
     def client(self, email):
         return self.get(f"/panel/api/clients/get/{email}").get("obj")

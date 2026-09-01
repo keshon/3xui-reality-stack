@@ -37,12 +37,11 @@ Things that are not obvious and cost time to find:
 Run on the server:  PANEL_USER=... PANEL_PASS=... python3 scripts/add-amneziawg.py
 """
 import json
-import sqlite3
 import subprocess
 import sys
 import time
 
-from panel import DB_PATH, Panel, as_dict, env_file, users, xray_healthy
+from panel import Panel, as_dict, env_file, users, xray_healthy
 
 
 def default_iface():
@@ -121,8 +120,7 @@ def main():
         inb = p.inbound("amneziawg")
 
     # ── peers ───────────────────────────────────────────────────────────────
-    con = sqlite3.connect(DB_PATH)
-    emails = [r[0] for r in con.execute("select email from clients")] or users(e)
+    emails = p.emails() or users(e)
     for who in emails:
         p.attach(who, [inb["id"]])
     time.sleep(6)

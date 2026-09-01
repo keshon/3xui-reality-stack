@@ -23,36 +23,41 @@ Run on the server:
 Without --apply it only prints what it would do.
 """
 import secrets
-import sqlite3
 import sys
 import uuid as uuidlib
 
-from panel import DB_PATH, Panel, env_file, normalize_client, valid_uuid
+from panel import Panel, env_file, normalize_client, valid_uuid
 
 APPLY = "--apply" in sys.argv
 DEFAULT_LANES = ("vless-reality,trojan-httpupgrade,hysteria2,mtproto,"
                  "amneziawg")
 
 
-def db_client(email):
-    con = sqlite3.connect(DB_PATH)
-    return con.execute("select uuid, password, auth, sub_id from clients "
-                       "where email=?", (email,)).fetchone()
+def stored(p, email):
+    """(uuid, password, auth, subId) as the panel reports them, or None.
+
+    Read back through the API rather than out of x-ui.db: this is the
+    post-write verification step, and it should observe the same view of the
+    data that every other consumer does.
+    """
+    c = (p.client(email) or {}).get("client")
+    if not c:
+        return None
+    return (c.get("uuid"), c.get("password"), c.get("auth"), c.get("subId"))
 
 
 def main():
     e = env_file()
     p = Panel(e).login()
 
-    con = sqlite3.connect(DB_PATH)
-    lanes = {r[1]: r[0] for r in con.execute("select id, remark from inbounds")}
+    lanes = {i["remark"]: i["id"] for i in p.inbounds()}
     # Plain `wireguard` is deliberately absent: its handshake is fixed-size
     # with recognisable constants. amneziawg is the obfuscated one, and is in.
     want = [k.strip() for k in e.get("LANES", DEFAULT_LANES).split(",") if k.strip()]
     target = [lanes[k] for k in want if k in lanes]
     print("target lanes:", ", ".join(k for k in want if k in lanes))
 
-    emails = [r[0] for r in con.execute("select email from clients order by email")]
+    emails = sorted(p.emails())
     people = sorted({x.split("-", 1)[-1] for x in emails})
 
     for who in people:
@@ -69,7 +74,7 @@ def main():
 
         # gather credentials from the clones BEFORE touching anything
         for d in dupes:
-            row = db_client(d)
+            row = stored(p, d)
             if row and row[1] and not c.get("password"):
                 c["password"] = row[1]
 
@@ -93,7 +98,7 @@ def main():
 
         # verify BEFORE deleting anything - a half-done merge that then loses
         # the duplicate's password is unrecoverable
-        row = db_client(who)
+        row = stored(p, who)
         if not (row and valid_uuid(row[0]) and row[1] and row[2]):
             print(f"  {who:12} VERIFY FAILED - leaving duplicates in place")
             continue

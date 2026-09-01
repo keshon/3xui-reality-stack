@@ -21,11 +21,9 @@ Run on the server:  PANEL_USER=... PANEL_PASS=... python3 scripts/add-mtproto.py
 """
 import binascii
 import json
-import sqlite3
 import sys
 
-from panel import (DB_PATH, Panel, env_file, mtg, normalize_client, users,
-                   xray_healthy)
+from panel import Panel, env_file, mtg, normalize_client, users, xray_healthy
 
 
 def fronts(secret, domain):
@@ -68,8 +66,7 @@ def main():
         print("mtproto inbound already exists")
 
     inb = p.inbound("mtproto")
-    con = sqlite3.connect(DB_PATH)
-    emails = [r[0] for r in con.execute("select email from clients")] or users(e)
+    emails = p.emails() or users(e)
 
     for who in emails:
         cur = p.client(who)

@@ -26,11 +26,10 @@ Run on the server:
 import json
 import os
 import secrets
-import sqlite3
 import sys
 import uuid
 
-from panel import DB_PATH, ROOT, Panel, as_dict, env_file, users, xray_healthy
+from panel import ROOT, Panel, as_dict, env_file, users, xray_healthy
 
 CRT = "/certs/certs/{}.crt"      # paths as seen inside the 3x-ui container
 KEY = "/certs/private/{}.key"
@@ -50,146 +49,164 @@ SNIFF = json.dumps({"enabled": True, "destOverride": ["http", "tls", "quic"],
 ALLOC = json.dumps({"strategy": "always", "refresh": 5, "concurrency": 3})
 
 
-def repair_hysteria_version(db=DB_PATH):
-    """Put settings.version=2 back after 3x-ui strips it.
-
-    3x-ui v3.7 does not model `version` for hysteria inbounds, so it drops the
-    field on every save - including when you merely open and save the inbound
-    in the panel UI. Xray then refuses to start AT ALL, so losing this one
-    integer takes every other lane down with it. Re-run after any panel edit
-    to a hysteria inbound, then restart 3x-ui.
-    """
-    con = sqlite3.connect(db)
-    fixed = 0
-    for iid, st in con.execute(
-            "select id, settings from inbounds where protocol='hysteria'"):
-        cfg = json.loads(st)
-        if cfg.get("version") != 2:
-            cfg["version"] = 2
-            con.execute("update inbounds set settings=? where id=?",
-                        (json.dumps(cfg), iid))
-            fixed += 1
-    con.commit()
-    return fixed
-
-
-def repair_vless_encryption(db=DB_PATH):
-    """Set settings.encryption="none" on every VLESS inbound.
-
-    3x-ui only ever echoes this field into generated client configs - it strips
-    it again when building the Xray config (StripVlessInboundEncryption), so it
-    cannot reach or upset the running core. Leaving it unset is not neutral:
-
-      * the plain share link omits `encryption` entirely, and each client
-        decides for itself what the default is;
-      * the JSON subscription emits `"encryption": ""`, which is not a legal
-        VLESS outbound value - Xray rejects the outbound and that client loses
-        the Reality lane while every other lane keeps working.
-
-    Xray 26.x added real VLESS encryption, where this field holds a generated
-    "mlkem768x25519plus..." string. "none" means off, which is what a Reality
-    inbound wants: the encryption is Reality's.
-    """
-    con = sqlite3.connect(db)
-    fixed = 0
-    for iid, st in con.execute(
-            "select id, settings from inbounds where protocol='vless'"):
-        cfg = json.loads(st)
-        if cfg.get("encryption") != "none":
-            cfg["encryption"] = "none"
-            con.execute("update inbounds set settings=? where id=?",
-                        (json.dumps(cfg), iid))
-            fixed += 1
-    con.commit()
-    return fixed
-
-
 # uTLS profiles Xray knows. "random"/"randomized" pick per connection.
 FINGERPRINTS = {"chrome", "firefox", "safari", "ios", "android", "edge",
                 "360", "qq", "random", "randomized"}
 
 
-def set_reality_fingerprint(fp, db=DB_PATH):
-    """Set the uTLS fingerprint published to clients on the Reality inbounds.
+def _want_hysteria_version(inbound, st, ss, env):
+    """settings.version must be the integer 2.
 
-    `fp` is a purely client-side choice - it selects which browser's ClientHello
-    the client imitates. The server only publishes a suggestion, which 3x-ui
-    copies into the share link as `fp=`.
-
-    It matters far more than it looks. Current Chrome sends a post-quantum key
-    share (X25519MLKEM768) roughly 1.2 KB on its own, which pushes the whole
-    ClientHello past 1700 bytes - over one segment on any normal path. The
-    handshake then arrives in two TCP segments, and a middlebox that forwards
-    the first and drops the second leaves it permanently half-delivered: the
-    server ACKs what it got and waits for a continuation that never comes, so
-    the connection hangs with no RST and no error anywhere. Other lanes on the
-    same host and port keep working, because only this one sends a ClientHello
-    that large.
-
-    A profile without the post-quantum key share (safari, ios) fits in a single
-    segment and never gives such a middlebox the seam to cut.
+    3x-ui's web UI does not model this field and drops it when an inbound is
+    opened and saved. On v3.7 that is survivable - the panel re-inserts it when
+    it generates the Xray config (HealHysteriaVersion) - but the stored row is
+    still wrong, and older panels had no such healing and simply would not
+    start. Cheap to keep correct at the source.
     """
+    return {"settings": {"version": 2}} if st.get("version") != 2 else None
+
+
+def _want_vless_encryption(inbound, st, ss, env):
+    """settings.encryption must be "none".
+
+    3x-ui only echoes this into generated client configs; it strips the field
+    again when building the Xray config, so it cannot upset the running core.
+    Leaving it unset is not neutral: the plain share link then omits
+    `encryption` entirely and each client picks its own default, while the JSON
+    subscription emits `"encryption": ""` - not a legal VLESS outbound value,
+    so a client on that format loses the Reality lane while every other lane
+    keeps working.
+    """
+    return {"settings": {"encryption": "none"}} if st.get("encryption") != "none" else None
+
+
+def _want_fingerprint(inbound, st, ss, env):
+    """realitySettings.settings.fingerprint - which browser clients imitate.
+
+    Purely a client-side choice; the server only publishes a suggestion, which
+    3x-ui copies into the share link as `fp=`. It matters far more than it
+    looks: current Chrome sends a post-quantum key share (X25519MLKEM768)
+    roughly 1.2 KB on its own, pushing the ClientHello past 1700 bytes and so
+    over one segment. A middlebox that forwards the first segment and drops the
+    second leaves the handshake permanently half-delivered - the server ACKs
+    what arrived and waits for a continuation that never comes, so the
+    connection hangs with no RST and no error anywhere, while every other lane
+    on the same host and port keeps working. safari and ios have no
+    post-quantum key share and fit in a single segment.
+    """
+    fp = (env.get("REALITY_FINGERPRINT") or "").strip()
+    if not fp:
+        return None
     if fp not in FINGERPRINTS:
-        raise SystemExit(f"unknown fingerprint {fp!r}; pick one of "
+        raise SystemExit(f"unknown REALITY_FINGERPRINT {fp!r}; pick one of "
                          f"{', '.join(sorted(FINGERPRINTS))}")
-    con = sqlite3.connect(db)
-    fixed = 0
-    for iid, ss in con.execute(
-            "select id, stream_settings from inbounds where protocol='vless'"):
-        cfg = json.loads(ss)
-        r = cfg.get("realitySettings")
-        if not r:
-            continue
-        if (r.get("settings") or {}).get("fingerprint") != fp:
-            r.setdefault("settings", {})["fingerprint"] = fp
-            con.execute("update inbounds set stream_settings=? where id=?",
-                        (json.dumps(cfg), iid))
-            fixed += 1
-    con.commit()
-    return fixed
+    r = ss.get("realitySettings")
+    if not r or (r.get("settings") or {}).get("fingerprint") == fp:
+        return None
+    return {"streamSettings": {"realitySettings":
+                               {"settings": {"fingerprint": fp}}}}
 
 
-def enable_sniffing(db=DB_PATH):
-    """Turn sniffing on for the Xray inbounds. See SNIFF above for why."""
-    con = sqlite3.connect(db)
+def _want_sniffing(inbound, st, ss, env):
+    """Sniffing must be on, or the bittorrent routing rule can never fire."""
+    cur = as_dict(inbound.get("sniffing"))
     want = json.loads(SNIFF)
-    fixed = 0
-    for iid, sn in con.execute(
-            "select id, sniffing from inbounds "
-            "where protocol in ('vless','trojan','hysteria')"):
-        try:
-            cur = json.loads(sn) if sn else {}
-        except (TypeError, ValueError):
-            cur = {}
-        if not cur.get("enabled") or cur.get("routeOnly") != want["routeOnly"]:
-            con.execute("update inbounds set sniffing=? where id=?",
-                        (SNIFF, iid))
-            fixed += 1
-    con.commit()
-    return fixed
+    if cur.get("enabled") and cur.get("routeOnly") == want["routeOnly"]:
+        return None
+    return {"sniffing": want}
+
+
+# name -> (protocols it applies to, function returning the desired delta)
+RECONCILERS = {
+    "hysteria-version": (("hysteria",), _want_hysteria_version),
+    "encryption": (("vless",), _want_vless_encryption),
+    "fingerprint": (("vless",), _want_fingerprint),
+    "sniffing": (("vless", "trojan", "hysteria"), _want_sniffing),
+}
+
+
+def _merge(dst, src):
+    for k, v in src.items():
+        if isinstance(v, dict) and isinstance(dst.get(k), dict):
+            _merge(dst[k], v)
+        else:
+            dst[k] = v
+    return dst
+
+
+def reconcile_inbounds(p, env, only=None):
+    """Bring stored inbounds in line with what this repo expects.
+
+    Everything goes through the panel API rather than x-ui.db. The schema is
+    3x-ui's private business and has changed shape between releases, and a
+    write that bypasses the panel also bypasses its validation - which is what
+    catches, for example, an out-of-range AmneziaWG parameter before it becomes
+    an inbound that cannot start.
+
+    All checks for one inbound are collected and applied as a SINGLE update,
+    because the panel restarts Xray after each one.
+    """
+    names = list(RECONCILERS) if only is None else list(only)
+    changed = []
+    for inbound in p.inbounds():
+        proto = inbound.get("protocol")
+        st = as_dict(inbound.get("settings"))
+        ss = as_dict(inbound.get("streamSettings"))
+        delta, applied = {}, []
+        for name in names:
+            protos, fn = RECONCILERS[name]
+            if proto not in protos:
+                continue
+            d = fn(inbound, st, ss, env)
+            if d:
+                _merge(delta, d)
+                applied.append(name)
+        if not delta:
+            continue
+        fields = {}
+        if "settings" in delta:
+            fields["settings"] = json.dumps(_merge(dict(st), delta["settings"]))
+        if "streamSettings" in delta:
+            fields["streamSettings"] = json.dumps(
+                _merge(dict(ss), delta["streamSettings"]))
+        if "sniffing" in delta:
+            fields["sniffing"] = json.dumps(delta["sniffing"])
+        r = p.update_inbound(inbound, **fields)
+        ok = bool(r.get("success"))
+        changed.append((inbound.get("remark"), applied, ok, r.get("msg", "")))
+    return changed
+
+
+def report(changed):
+    for remark, applied, ok, msg in changed:
+        print(f"  {remark:22} {', '.join(applied):40} "
+              f"{'ok' if ok else 'FAILED: ' + str(msg)[:60]}")
+    if not changed:
+        print("  nothing to change")
+    return sum(1 for c in changed if not c[2])
+
+
+# CLI aliases for a subset of the reconcilers, kept because they are what the
+# docs and the runbook tell you to type.
+FLAGS = {
+    "--repair-hysteria": ["hysteria-version"],
+    "--sniffing": ["sniffing"],
+    "--repair-links": ["encryption"],
+    "--fingerprint": ["fingerprint"],
+    "--reconcile": None,          # None = everything
+}
 
 
 def main():
-    if "--repair-hysteria" in sys.argv:
-        print(f"repaired {repair_hysteria_version()} hysteria inbound(s); "
-              f"restart 3x-ui to apply")
-        return
-
-    if "--sniffing" in sys.argv:
-        print(f"enabled sniffing on {enable_sniffing()} inbound(s); "
-              f"restart 3x-ui to apply")
-        return
-
-    if "--repair-links" in sys.argv:
-        print(f"set encryption=none on {repair_vless_encryption()} "
-              f"vless inbound(s)")
-        return
-
-    if "--fingerprint" in sys.argv:
-        fp = sys.argv[sys.argv.index("--fingerprint") + 1]
-        print(f"set fingerprint={fp} on {set_reality_fingerprint(fp)} "
-              f"reality inbound(s); restart 3x-ui to apply")
-        return
+    flag = next((a for a in sys.argv if a in FLAGS), None)
+    if flag:
+        e = env_file()
+        if flag == "--fingerprint":
+            i = sys.argv.index(flag)
+            if i + 1 < len(sys.argv) and not sys.argv[i + 1].startswith("-"):
+                e["REALITY_FINGERPRINT"] = sys.argv[i + 1]
+        p = Panel(e).login()
+        sys.exit(1 if report(reconcile_inbounds(p, e, FLAGS[flag])) else 0)
 
     e = env_file()
     dom = e["PUBLIC_DOMAIN"]
@@ -229,7 +246,7 @@ def main():
             "port": 443, "protocol": "vless", "expiryTime": 0,
             "up": 0, "down": 0, "total": 0,
             # decryption is what Xray reads; encryption is echoed into the
-            # client configs. See repair_vless_encryption().
+            # client configs. See _want_vless_encryption().
             "settings": json.dumps({"clients": clients, "decryption": "none",
                                     "encryption": "none", "fallbacks": []}),
             "streamSettings": json.dumps({
@@ -247,7 +264,7 @@ def main():
                     "privateKey": os.environ["REALITY_PRIV"],
                     "shortIds": short_ids,
                     "settings": {"publicKey": os.environ["REALITY_PUB"],
-                                 # see set_reality_fingerprint()
+                                 # see _want_fingerprint()
                                  "fingerprint": e.get("REALITY_FINGERPRINT")
                                  or "chrome",
                                  "serverName": "", "spiderX": "/"}},
@@ -301,7 +318,7 @@ def main():
             "port": 443, "protocol": "hysteria", "expiryTime": 0,
             "up": 0, "down": 0, "total": 0,
             # settings.version MUST be int 2, and 3x-ui strips it on save -
-            # see repair_hysteria_version() above.
+            # see _want_hysteria_version() above.
             "settings": json.dumps({"version": 2, "users": us}),
             "streamSettings": json.dumps({
                 # network=hysteria is required, or Xray says
@@ -318,18 +335,10 @@ def main():
             "sniffing": SNIFF, "allocate": ALLOC})
         print("hysteria2:", r.get("success"), r.get("msg", ""))
 
-    n = repair_hysteria_version()
-    if n:
-        print(f"repaired settings.version on {n} hysteria inbound(s)")
-    n = repair_vless_encryption()
-    if n:
-        print(f"set settings.encryption=none on {n} vless inbound(s)")
-    fp = e.get("REALITY_FINGERPRINT")
-    if fp and set_reality_fingerprint(fp):
-        print(f"set fingerprint={fp} on the reality inbound(s)")
-    n = enable_sniffing()
-    if n:
-        print(f"enabled sniffing on {n} inbound(s) - the bittorrent rule needs it")
+    changed = reconcile_inbounds(p, e)
+    if changed:
+        print("reconciled:")
+        report(changed)
 
     if not xray_healthy():
         print("WARNING: Xray is not healthy - docker logs 3x-ui", file=sys.stderr)

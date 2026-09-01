@@ -206,21 +206,11 @@ echo "  panel      https://${PANEL_DOMAIN}${PANEL_PATH}/"
 [ -n "$NEW_CREDS" ] && echo "  login      ${PANEL_USER} / ${PANEL_PASS}"
 echo
 echo "  subscriptions (one URL per person, all lanes):"
-python3 - <<'PY'
-import sqlite3
-env = {}
-for line in open(".env"):
-    line = line.strip()
-    if line and not line.startswith("#") and "=" in line:
-        k, v = line.split("=", 1); env[k] = v.strip('"').strip("'")
 # PUBLIC_DOMAIN, not PANEL_DOMAIN: the subscription router is bound to the
 # public hostname (see xui/docker-compose.yml), and configure-subscription.py
-# writes the same host into subURI. Printing the admin hostname here would
-# hand out a URL that lands on the decoy.
-db = sqlite3.connect("xui/db/x-ui.db")
-for email, sub in db.execute("select email, sub_id from clients order by email"):
-    print(f"    {email:12} https://{env['PUBLIC_DOMAIN']}{env['SUB_PATH']}/{sub}")
-PY
+# writes the same host into subURI. Printing the admin hostname here would hand
+# out a URL that lands on the decoy.
+PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS"   python3 scripts/client-links.py --urls || warn "could not list subscriptions"
 echo
 echo "  credentials: ./CLIENT-CREDENTIALS.txt (mode 600)"
 [ "$fail" = 0 ] || echo -e "\n  \033[33msome checks did not pass - see above\033[0m"
