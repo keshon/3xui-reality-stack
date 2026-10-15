@@ -105,6 +105,49 @@ def users(env=None):
     return parse_users(env.get("USERS", "user1"))
 
 
+def nodes_file(env=None):
+    """Path of the node list (master side), or None if not configured."""
+    env = env or env_file()
+    name = env.get("NODES_FILE", "nodes.txt").strip()
+    if not name:
+        return None
+    path = name if os.path.isabs(name) else os.path.join(ROOT, name)
+    return path if os.path.exists(path) else None
+
+
+def read_nodes(path=None, env=None):
+    """Parse nodes.txt into [{name, url, token, domain}, ...].
+
+    One node per line: `<name> <panel-url> <api-token> <public-domain>`;
+    '#' starts a comment, blank lines are ignored. The panel URL carries
+    the node's secret PANEL_PATH, so the file must stay mode 600.
+    """
+    env = env or env_file()
+    path = path or nodes_file(env)
+    if not path:
+        raise SystemExit("no nodes.txt - copy nodes.txt.example and fill it in")
+    out, seen = [], set()
+    for lineno, raw in enumerate(open(path, encoding="utf-8"), 1):
+        line = raw.split("#", 1)[0].split()
+        if not line:
+            continue
+        if len(line) != 4:
+            raise SystemExit(
+                f"{path} line {lineno}: want "
+                f"'<name> <panel-url> <api-token> <public-domain>'")
+        name, url, token, domain = line
+        if not re.match(r"^[a-z0-9_]{1,24}$", name):
+            raise SystemExit(
+                f"{path} line {lineno}: bad node name {name!r} - use "
+                f"1-24 chars of a-z, 0-9 or '_' (it becomes the remark prefix)")
+        if name in seen:
+            raise SystemExit(f"{path} line {lineno}: duplicate node {name!r}")
+        seen.add(name)
+        out.append({"name": name, "url": url, "token": token,
+                    "domain": domain})
+    return out
+
+
 def container_ip(name="3x-ui"):
     return subprocess.run(
         ["docker", "inspect", "-f",
@@ -244,6 +287,20 @@ class Panel:
     def attach(self, email, inbound_ids):
         return self.post(f"/panel/api/clients/{email}/attach",
                          {"inboundIds": inbound_ids})
+
+    def add_client(self, client, inbound_ids):
+        """Create one unified client attached to the given inbounds.
+
+        Sources: ClientController.create binds service.ClientCreatePayload
+        {client, inboundIds} (client.go); Create fills protocol credentials
+        and mints subId when empty, and requires at least one inbound
+        (client_crud.go). Minimal {email} is enough - the rest is defaulted.
+        """
+        return self.post("/panel/api/clients/add",
+                         {"client": client, "inboundIds": inbound_ids})
+
+    def node_list(self):
+        return self.get("/panel/api/nodes/list").get("obj") or []
 
     def settings(self):
         # POST, despite reading. (inbounds/list is the opposite - a GET that

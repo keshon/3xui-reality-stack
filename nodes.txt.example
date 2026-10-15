@@ -1,0 +1,31 @@
+# Managed nodes. Lives on the MASTER only; copy to nodes.txt and fill in.
+# Mode 600: every line carries a node panel's API token.
+#
+# One node per line:
+#   <name> <panel-url> <api-token> <public-domain>
+#
+# name           short label, a-z/0-9/_ up to 24 chars. Becomes the inbound
+#                remark prefix on that node (DE-reality, NL-reality, ...),
+#                so keep it short and stable - renaming a node later means
+#                new remarks (stage 3).
+# panel-url      the node panel's base URL, INCLUDING its secret PANEL_PATH,
+#                e.g. https://ops-de.example.com:2053/panel-9f3a2b1c4d5e
+#                (scheme + host + port + base path; the master splits it into
+#                the NodeMutationRequest fields itself).
+# api-token      the node's NODE_API_TOKEN from ITS .env (node-sync scope,
+#                minted by install.sh ROLE=node). Write-only upstream: the
+#                master never reads it back, so keep this file.
+# public-domain  the ONE hostname clients touch on that node (its PUBLIC_DOMAIN).
+#                Becomes the Reality serverName and the link address (stage 3).
+#                Must NOT be the node's PANEL_DOMAIN.
+#
+# '#' starts a comment, blank lines are ignored.
+#
+# When a node burns (blocked IP): bring up a fresh VPS with ROLE=node,
+# replace the line (new panel-url, new token, new or same public-domain),
+# then: nodes.py add, provision lanes (stage 3), reconcile users (stage 4),
+# nodes.py remove --yes for the old name.
+
+# de https://ops-de.example.com:2053/panel-CHANGE-ME PASTE_NODE_API_TOKEN_HERE www-de.example.com
+# nl https://ops-nl.example.com:2053/panel-CHANGE-ME PASTE_NODE_API_TOKEN_HERE www-nl.example.com
+# fr https://ops-fr.example.com:2053/panel-CHANGE-ME PASTE_NODE_API_TOKEN_HERE www-fr.example.com
