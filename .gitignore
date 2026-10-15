@@ -1,10 +1,12 @@
 # secrets and generated state - never commit
 .env
 users.txt
+nodes.txt
 CLIENT-CREDENTIALS.txt
 CLIENT-LINKS.txt
 handout/
 awg/
+backups/
 
 # runtime data
 traefik/data/
