@@ -54,6 +54,14 @@ load_env
 [ "${ACME_MODE:-dns}" != dns ] || [ -n "${CF_DNS_API_TOKEN:-}" ] \
   || die "ACME_MODE=dns needs CF_DNS_API_TOKEN (or set ACME_MODE=http)"
 
+ROLE="${ROLE:-standalone}"
+case "$ROLE" in
+  standalone|master|node) ;;
+  *) die "ROLE='$ROLE' is not usable - set standalone, master or node in .env";;
+esac
+set_env ROLE "$ROLE"
+say "role: $ROLE"
+
 # ── 1. fill in anything left blank ──────────────────────────────────────────
 say "secrets"
 NEW_CREDS=""
@@ -66,15 +74,23 @@ if [ -z "${PANEL_PASS:-}" ]; then set_env PANEL_PASS "$(openssl rand -base64 15)
 : "${PROXY_SUBNET:=172.28.0.0/16}"; set_env PROXY_SUBNET "$PROXY_SUBNET"
 : "${MTPROTO_PORT:=8443}";          set_env MTPROTO_PORT "$MTPROTO_PORT"
 : "${AWG_PORT:=51820}";             set_env AWG_PORT "$AWG_PORT"
+# .env holds the Cloudflare token, panel credentials and (on a node) the API
+# token - it is never committed (.gitignore) and stays owner-only.
+chmod 600 .env
 
 # ── 1b. the account list ────────────────────────────────────────────────────
 # users.txt is the editable input, USERS= in .env is what every script reads.
 # Resolve both into one answer HERE, so an unusable name fails now rather than
 # half way through provisioning with some lanes already created.
 say "users"
-USERS="$(python3 scripts/resolve-users.py)" || die "fix the account list, then re-run"
-set_env USERS "$USERS"
-python3 scripts/resolve-users.py --list | sed 's/^/   /'
+if [ "$ROLE" = node ]; then
+  warn "node role: no local users - users.txt lives on the master, clients"
+  warn "arrive from there (stages 3-4), so nothing is resolved here"
+else
+  USERS="$(python3 scripts/resolve-users.py)" || die "fix the account list, then re-run"
+  set_env USERS "$USERS"
+  python3 scripts/resolve-users.py --list | sed 's/^/   /'
+fi
 
 # ── 2. DNS must resolve here before ACME will work ──────────────────────────
 say "dns"
@@ -152,31 +168,54 @@ docker restart 3x-ui >/dev/null; sleep 10
 ok "panel at https://${PANEL_DOMAIN}${PANEL_PATH}/"
 
 # subscription URLs must be the public https ones, not the panel's internal
-# host:2096 default
-python3 scripts/configure-subscription.py || warn "subscription settings not applied"
+# host:2096 default. A node serves no subscriptions at all - the master does.
+if [ "$ROLE" = node ]; then
+  warn "node role: skipping subscription settings - the master serves them"
+else
+  python3 scripts/configure-subscription.py || warn "subscription settings not applied"
+fi
+
+# The node role reaches its panel only through a node-sync-scoped Bearer
+# token (scripts/mint-node-token.py): exactly the node-sync allowlist, never
+# the admin surface. The panel password stays a local bootstrap secret.
+if [ "$ROLE" = node ]; then
+  PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS" \
+    python3 scripts/mint-node-token.py || die "node API token not minted - the master cannot manage this node"
+fi
 
 # ── 6. lanes and accounts ───────────────────────────────────────────────────
+# A node gets no local lanes: the master pushes them onto it (stage 3), with
+# per-node Reality keys. Provisioning them here would bake in a second copy
+# of this host's keys and collide with the sync.
 say "lanes"
-KEYS="$(docker exec 3x-ui /app/bin/xray-linux-amd64 x25519)"
-REALITY_PRIV="$(echo "$KEYS" | awk -F': *' '/[Pp]rivate/{print $2; exit}')"
-REALITY_PUB="$(echo "$KEYS"  | awk -F': *' '/Password|[Pp]ublic/{print $2; exit}')"
-[ -n "$REALITY_PRIV" ] && [ -n "$REALITY_PUB" ] || die "could not generate a Reality keypair"
+if [ "$ROLE" = node ]; then
+  warn "node role: no local lanes - the master pushes them (stage 3)"
+else
+  KEYS="$(docker exec 3x-ui /app/bin/xray-linux-amd64 x25519)"
+  REALITY_PRIV="$(echo "$KEYS" | awk -F': *' '/[Pp]rivate/{print $2; exit}')"
+  REALITY_PUB="$(echo "$KEYS"  | awk -F': *' '/Password|[Pp]ublic/{print $2; exit}')"
+  [ -n "$REALITY_PRIV" ] && [ -n "$REALITY_PUB" ] || die "could not generate a Reality keypair"
 
-PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS" \
-  REALITY_PRIV="$REALITY_PRIV" REALITY_PUB="$REALITY_PUB" \
-  python3 scripts/provision-inbounds.py
+  PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS" \
+    REALITY_PRIV="$REALITY_PRIV" REALITY_PUB="$REALITY_PUB" \
+    python3 scripts/provision-inbounds.py
 
-PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS" \
-  python3 scripts/add-mtproto.py || warn "mtproto lane not added"
+  PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS" \
+    python3 scripts/add-mtproto.py || warn "mtproto lane not added"
 
-PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS" \
-  python3 scripts/add-amneziawg.py || warn "amneziawg lane not added"
+  PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS" \
+    python3 scripts/add-amneziawg.py || warn "amneziawg lane not added"
 
-docker restart 3x-ui >/dev/null; sleep 10
+  docker restart 3x-ui >/dev/null; sleep 10
+fi
 
 say "accounts"
-PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS" \
-  python3 scripts/consolidate-clients.py --apply
+if [ "$ROLE" = node ]; then
+  warn "node role: no local accounts - clients arrive from the master (stage 4)"
+else
+  PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS" \
+    python3 scripts/consolidate-clients.py --apply
+fi
 
 # ── 7. verify ───────────────────────────────────────────────────────────────
 say "verify"
@@ -197,15 +236,24 @@ docker logs --tail 40 3x-ui 2>&1 | grep -q 'Failed to start' \
   || ok "Xray running"
 
 say "done"
+echo "  role       ${ROLE}"
 echo "  panel      https://${PANEL_DOMAIN}${PANEL_PATH}/"
 [ -n "$NEW_CREDS" ] && echo "  login      ${PANEL_USER} / ${PANEL_PASS}"
-echo
-echo "  subscriptions (one URL per person, all lanes):"
-# PUBLIC_DOMAIN, not PANEL_DOMAIN: the subscription router is bound to the
-# public hostname (see xui/docker-compose.yml), and configure-subscription.py
-# writes the same host into subURI. Printing the admin hostname here would hand
-# out a URL that lands on the decoy.
-PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS"   python3 scripts/client-links.py --urls || warn "could not list subscriptions"
-echo
-echo "  credentials: ./CLIENT-CREDENTIALS.txt (mode 600)"
+if [ "$ROLE" = node ]; then
+  echo
+  echo "  no subscriptions here - users attach to the master's URL."
+  echo "  the master reaches this panel with NODE_API_TOKEN from .env"
+  echo "  (mode 600); hand it over at 'nodes.py add' time (stage 2)."
+  echo "  lanes and clients arrive from the master (stages 3-4)."
+else
+  echo
+  echo "  subscriptions (one URL per person, all lanes):"
+  # PUBLIC_DOMAIN, not PANEL_DOMAIN: the subscription router is bound to the
+  # public hostname (see xui/docker-compose.yml), and configure-subscription.py
+  # writes the same host into subURI. Printing the admin hostname here would hand
+  # out a URL that lands on the decoy.
+  PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS"   python3 scripts/client-links.py --urls || warn "could not list subscriptions"
+  echo
+  echo "  credentials: ./CLIENT-CREDENTIALS.txt (mode 600)"
+fi
 [ "$fail" = 0 ] || echo -e "\n  \033[33msome checks did not pass - see above\033[0m"
