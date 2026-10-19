@@ -32,6 +32,8 @@ import sys
 import urllib.error
 
 from panel import ROOT, Panel, env_file
+from pathlib import Path
+from stackctl.envio import update_env
 
 TOKEN_NAME = os.environ.get("NODE_TOKEN_NAME", "master-node-sync")
 SCOPE = "node-sync"
@@ -59,21 +61,7 @@ def list_tokens(p):
 
 
 def store_env_token(value):
-    path = os.path.join(ROOT, ".env")
-    key = ENV_KEY + "="
-    lines = open(path, encoding="utf-8").read().split("\n")
-    out, found = [], False
-    for line in lines:
-        if line.startswith(key):
-            out.append(key + value)
-            found = True
-        else:
-            out.append(line)
-    if not found:
-        out.append(key + value)
-    with open(path, "w", newline="\n") as f:
-        f.write("\n".join(out))
-    os.chmod(path, 0o600)
+    update_env(Path(ROOT) / ".env", {ENV_KEY: value})
 
 
 def main():
@@ -96,7 +84,7 @@ def main():
         print(f"  token '{TOKEN_NAME}' already exists "
               f"(id={live[0]['id']}, scope={SCOPE}, never expires) - keeping")
         if not have:
-            print(f"  !! {ENV_KEY} is empty in .env but the plaintext is shown "
+            die(f"{ENV_KEY} is empty in .env but the plaintext is shown "
                   f"only at creation and cannot be read back - enter it "
                   f"manually or re-run with --rotate")
         return

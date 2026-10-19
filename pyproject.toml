@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reality-stackctl"
+version = "0.1.0"
+description = "Local configuration wizard and resumable deployment for 3xui-reality-stack"
+requires-python = ">=3.11"
+dependencies = ["textual==8.2.8"]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[project.scripts]
+stack = "stackctl.cli:main"
+
+[tool.setuptools]
+packages = ["stackctl"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

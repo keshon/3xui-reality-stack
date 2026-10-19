@@ -28,6 +28,10 @@ tmp/
 # python
 __pycache__/
 *.pyc
+.venv/
+.pytest_cache/
+.stack/
+*.egg-info/
 
 # editors / os
 *.swp

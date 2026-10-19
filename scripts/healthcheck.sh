@@ -3,8 +3,7 @@
 # Exit code is non-zero on ANY problem, so cron/uptimerobot can just watch it.
 #
 #   PANEL_USER=... PANEL_PASS=... ./scripts/healthcheck.sh
-#   (PANEL_USER/PASS come from the master's .env - the script reads it;
-#   explicit env wins if set.)
+#   (PANEL_USER/PASS come from the master's .env, parsed literally.)
 #
 # nodes.txt columns used: name (label), public-domain (data path). Panel-url
 # and token are nodes.py's business (master-status step calls it).
@@ -24,16 +23,8 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# Same no-source .env parse as bootstrap.sh/install.sh: sourcing would expand
-# '$' inside password hashes under `set -u`.
-if [ -f .env ]; then
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in ''|'#'*) continue;; *'='*) ;; *) continue;; esac
-    k=${line%%=*}; v=${line#*=}
-    case "$v" in '"'*'"') v=${v#\"}; v=${v%\"};; "'"*"'") v=${v#'}; v=${v%'};; esac
-    case "$k" in PANEL_USER|PANEL_PASS) export "$k=${!k:-$v}";; esac
-  done < .env
-fi
+source "$ROOT/scripts/env.sh"
+load_stack_env || exit 1
 
 CERT_WARN_DAYS=30
 CERT_FAIL_DAYS=14
@@ -43,7 +34,13 @@ report=""
 say() { printf '%-4s %-12s %s\n' "$1" "$2" "$3"; report="$report$1 $2 $3
 "; }
 
-[ -f nodes.txt ] || { echo "no nodes.txt - nothing to check"; exit 0; }
+if [ ! -f nodes.txt ]; then
+  if [ "${ROLE:-standalone}" = master ]; then
+    echo "FAIL: master has no nodes.txt"; exit 1
+  fi
+  echo "no managed nodes configured; this check does not cover local traffic"
+  exit 0
+fi
 
 while IFS= read -r raw || [ -n "$raw" ]; do
   line=${raw%%#*}
@@ -81,7 +78,7 @@ except Exception as ex:  # noqa: BLE001 - DNS etc: a failed check, not a crash
     print(f"udp/443 ERROR ({ex})")
     sys.exit(2)
 PY
-) && say OK "$name" "$udp_out" || { say FAIL "$name" "$udp_out"; fail=1; }
+) && say WARN "$name" "$udp_out (unverified; protocol handshake required)" || { say FAIL "$name" "$udp_out"; fail=1; }
 
   # ── certificate lifetime on the data path ──
   end=$(echo | openssl s_client -connect "$domain:443" -servername "$domain" 2>/dev/null \
@@ -115,7 +112,7 @@ done < nodes.txt
 
 echo "---"
 if [ "$fail" = 0 ]; then
-  echo "all nodes healthy"
+  echo "checked paths reachable; UDP protocol health remains unverified"
 else
   echo "PROBLEMS FOUND"
   if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then

@@ -35,6 +35,7 @@ preserves omitted credentials; attach adds missing per-inbound clients.
 """
 import sys
 import time
+import math
 
 from panel import Panel, env_file, normalize_client, users
 
@@ -57,7 +58,7 @@ def limits(env):
         days = float(env.get("USER_EXPIRY_DAYS") or 0)
     except ValueError:
         raise SystemExit("USER_EXPIRY_DAYS must be a number")
-    if gb < 0 or days < 0:
+    if not math.isfinite(gb) or not math.isfinite(days) or gb < 0 or days < 0:
         raise SystemExit("USER_LIMIT_GB/USER_EXPIRY_DAYS must be >= 0")
     total = int(gb * GB)
     expiry = int(time.time() * 1000 + days * DAY_MS) if days else 0
@@ -88,11 +89,8 @@ def main():
         raise SystemExit("reconcile-clients runs on the master - users.txt "
                          "lives there, and the panel fans writes out itself")
     people = users(e)
-    try:
-        from panel import read_nodes
-        node_names = [n["name"] for n in read_nodes(env=e)]
-    except SystemExit:
-        node_names = []
+    from panel import read_nodes
+    node_names = [n["name"] for n in read_nodes(env=e)]
 
     want_total, want_expiry = limits(e)
     p = Panel(e).login()
@@ -103,6 +101,8 @@ def main():
         print("nodes: " + ", ".join(node_names))
     if not target:
         raise SystemExit("no target lanes exist - provision them first")
+    if missing:
+        raise SystemExit("required lanes are missing - provision them before changing clients")
 
     plan_add, plan_attach, plan_limits, plan_prune = [], [], [], []
     ok, failed = 0, 0
@@ -126,8 +126,9 @@ def main():
         have = set(cur.get("inboundIds") or [])
         lacking = [i for i in target if i not in have]
         c = cur["client"]
-        limited = ((want_total and c.get("totalGB") != want_total) or
-                   (want_expiry and c.get("expiryTime") != want_expiry))
+        # A lifetime is assigned at creation, never moved forward by a retry.
+        # Changing an existing expiry requires an explicit renewal operation.
+        limited = bool(want_total and c.get("totalGB") != want_total)
         if not lacking and not limited:
             ok += 1
             continue
@@ -146,7 +147,6 @@ def main():
         if limited:
             c = normalize_client(c)
             c["totalGB"] = want_total or c.get("totalGB", 0)
-            c["expiryTime"] = want_expiry or c.get("expiryTime", 0)
             r = p.update_client(who, c)
             if not r.get("success"):
                 print(f"  {who:12} LIMITS FAILED: {r.get('msg')}")

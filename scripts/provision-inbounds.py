@@ -27,6 +27,8 @@ import json
 import os
 import secrets
 import sys
+import time
+import math
 import uuid
 
 from panel import ROOT, Panel, as_dict, env_file, read_nodes, users, xray_healthy
@@ -257,8 +259,7 @@ def provision_node_lanes(p, env, entry, node_id):
         old = existing.get(remark)
         if old is not None:
             if old.get("nodeId") != node_id:
-                print(f"  {remark:22} WARNING: exists but is not on node "
-                      f"'{prefix}' - leaving it alone")
+                raise SystemExit(f"{remark} belongs to a different node; use the replacement runbook")
             else:
                 print(f"  {remark:22} already exists - keeping its keys")
             continue
@@ -323,10 +324,7 @@ def provision_node_lanes(p, env, entry, node_id):
 
 def provision_all_nodes(p, env):
     """Create missing lanes on every node from nodes.txt. Returns remarks."""
-    try:
-        entries = read_nodes(env=env)
-    except SystemExit:
-        return []                      # no nodes.txt: standalone, nothing to do
+    entries = read_nodes(env=env)
     ids = {n["name"]: n["id"] for n in p.node_list()}
     done = []
     for entry in entries:
@@ -352,9 +350,17 @@ def main():
         sys.exit(1 if report(reconcile_inbounds(p, e, FLAGS[flag])) else 0)
 
     e = env_file()
+    if (e.get("ROLE") or "standalone") == "node":
+        raise SystemExit("provision-inbounds runs on the master, not a traffic node")
     dom = e["PUBLIC_DOMAIN"]
     cert = e.get("CERT_BASENAME", e["BASE_DOMAIN"])
     people = users(e)
+    gb = float(e.get("USER_LIMIT_GB") or 0)
+    days = float(e.get("USER_EXPIRY_DAYS") or 0)
+    if not math.isfinite(gb) or not math.isfinite(days) or gb < 0 or days < 0:
+        raise SystemExit("User limits must be finite non-negative numbers")
+    initial_total = int(gb * 1024 ** 3)
+    initial_expiry = int((time.time() + days * 86400) * 1000) if days else 0
 
     p = Panel(e).login()
     existing = {i["remark"]: i for i in p.inbounds()}
@@ -380,7 +386,7 @@ def main():
             cid = str(uuid.uuid4())
             clients.append({"id": cid, "email": f"r-{who}",
                             "flow": "xtls-rprx-vision", "enable": True,
-                            "limitIp": 0, "totalGB": 0, "expiryTime": 0,
+                            "limitIp": 0, "totalGB": initial_total, "expiryTime": initial_expiry,
                             "subId": sub_ids[who], "tgId": 0, "reset": 0})
             creds.append(("reality-uuid", who, cid))
         short_ids = [secrets.token_hex(4), secrets.token_hex(8)]
@@ -428,8 +434,8 @@ def main():
         for who in people:
             pw = secrets.token_urlsafe(24)
             clients.append({"password": pw, "email": f"t-{who}",
-                            "enable": True, "limitIp": 0, "totalGB": 0,
-                            "expiryTime": 0, "subId": sub_ids[who],
+                            "enable": True, "limitIp": 0, "totalGB": initial_total,
+                            "expiryTime": initial_expiry, "subId": sub_ids[who],
                             "tgId": 0, "reset": 0})
             creds.append(("trojan-password", who, pw))
         r = p.add_inbound({
@@ -453,8 +459,8 @@ def main():
         for who in people:
             pw = secrets.token_urlsafe(18)
             us.append({"auth": pw, "email": f"h-{who}", "subId": sub_ids[who],
-                       "enable": True, "limitIp": 0, "totalGB": 0,
-                       "expiryTime": 0, "tgId": 0, "reset": 0})
+                       "enable": True, "limitIp": 0, "totalGB": initial_total,
+                       "expiryTime": initial_expiry, "tgId": 0, "reset": 0})
             creds.append(("hysteria2-auth", who, pw))
         r = p.add_inbound({
             "remark": "hysteria2", "enable": True, "listen": "",
@@ -489,10 +495,11 @@ def main():
     changed = reconcile_inbounds(p, e)
     if changed:
         print("reconciled:")
-        report(changed)
+        if report(changed):
+            raise SystemExit("inbound reconciliation failed")
 
     if not xray_healthy():
-        print("WARNING: Xray is not healthy - docker logs 3x-ui", file=sys.stderr)
+        raise SystemExit("Xray is not healthy - docker logs 3x-ui")
 
     if not creds:
         print("nothing to do - all lanes already exist")

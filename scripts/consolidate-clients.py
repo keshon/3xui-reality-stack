@@ -26,7 +26,7 @@ import secrets
 import sys
 import uuid as uuidlib
 
-from panel import Panel, env_file, normalize_client, valid_uuid
+from panel import Panel, env_file, normalize_client, valid_uuid, users
 
 APPLY = "--apply" in sys.argv
 DEFAULT_LANES = ("vless-reality,trojan-httpupgrade,hysteria2,mtproto,"
@@ -59,6 +59,9 @@ def main():
 
     emails = sorted(p.emails())
     people = sorted({x.split("-", 1)[-1] for x in emails})
+    if "--managed-only" in sys.argv:
+        people = [who for who in people if who in set(users(e))]
+    failed = 0
 
     for who in people:
         clones = [x for x in emails if x == who or x.split("-", 1)[-1] == who]
@@ -69,6 +72,7 @@ def main():
         cur = p.client(primary)
         if not cur:
             print(f"  {who:12} SKIP (cannot read {primary})")
+            failed += 1
             continue
         c = normalize_client(cur["client"])
 
@@ -93,22 +97,32 @@ def main():
         r1 = p.update_client(primary, c)
         if not r1.get("success"):
             print(f"  {who:12} UPDATE FAILED: {r1.get('msg')}")
+            failed += 1
             continue
         r2 = p.attach(who, target)
+        if not r2.get("success"):
+            print(f"  {who:12} ATTACH FAILED - leaving duplicates in place")
+            failed += 1
+            continue
 
         # verify BEFORE deleting anything - a half-done merge that then loses
         # the duplicate's password is unrecoverable
         row = stored(p, who)
-        if not (row and valid_uuid(row[0]) and row[1] and row[2]):
+        attached = (p.client(who) or {}).get("inboundIds") or []
+        if not (row and valid_uuid(row[0]) and row[1] and row[2] and set(target) <= set(attached)):
             print(f"  {who:12} VERIFY FAILED - leaving duplicates in place")
+            failed += 1
             continue
         for d in dupes:
-            p.post(f"/panel/api/clients/del/{d}")
-        print(f"  {who:12} ok  uuid={row[0][:8]} sub={row[3]} "
-              f"attach={r2.get('success')} removed={dupes or '-'}")
+            if not p.post(f"/panel/api/clients/del/{d}").get("success"):
+                failed += 1
+                print(f"  {d:12} DELETE FAILED")
+        print(f"  {who:12} merged onto {len(target)} lane(s)")
 
     if not APPLY:
         print("\ndry run - re-run with --apply")
+    if failed:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

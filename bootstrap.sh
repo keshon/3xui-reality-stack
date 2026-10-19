@@ -5,15 +5,22 @@ cd "$(dirname "$0")"
 
 [ -f .env ] || { echo "!! copy .env.example to .env and fill it in first"; exit 1; }
 
-# Load .env WITHOUT sourcing it. Sourcing runs the file as shell, so any value
-# containing '$' - an apr1/bcrypt password hash, for instance - gets expanded
-# as a variable and either mangles the value or aborts under `set -u`.
-while IFS= read -r line || [ -n "$line" ]; do
-  case "$line" in ''|'#'*) continue;; *'='*) ;; *) continue;; esac
-  k=${line%%=*}; v=${line#*=}
-  case "$v" in '"'*'"') v=${v#\"}; v=${v%\"};; "'"*"'") v=${v#'}; v=${v%'};; esac
-  export "$k=$v"
-done < .env
+ROOT="$(pwd)"
+source "$ROOT/scripts/env.sh"
+load_stack_env
+
+# Do not publish a fresh node's default panel credentials while ACME is
+# pending. The installer marks the exact access configuration ready only
+# after setting it and successfully logging in. Any access change hides this
+# listener again until the panel stage finishes.
+if [ "${ROLE:-standalone}" = node ]; then
+  revision=$(python3 "$ROOT/scripts/config-env.py" --panel-revision)
+  ready=$(cat "$ROOT/.stack/panel-ready" 2>/dev/null || true)
+  if [ "$revision" != "$ready" ]; then
+    export MANAGEMENT_BIND=127.0.0.1
+    echo ">> management HTTPS stays local until panel credentials are verified"
+  fi
+fi
 
 # Fixed subnet so Traefik's proxyProtocol trustedIPs is deterministic.
 if ! docker network inspect proxy >/dev/null 2>&1; then

@@ -19,34 +19,20 @@ die()  { printf '\n\033[31mfatal\033[0m %s\n' "$1" >&2; exit 1; }
 [ "$(id -u)" = 0 ] || die "run as root (docker, sysctl and ufw all need it)"
 [ -f .env ] || die "no .env - copy .env.example to .env and fill it in"
 
-# Parse .env WITHOUT sourcing it. Sourcing executes the file as shell, so any
-# value containing '$' - an apr1 password hash, for instance - gets expanded as
-# a variable and either mangles the value or aborts under `set -u`.
-load_env() {
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in ''|'#'*) continue;; *'='*) ;; *) continue;; esac
-    local k="${line%%=*}" v="${line#*=}"
-    case "$v" in '"'*'"') v="${v#\"}"; v="${v%\"}";; "'"*"'") v="${v#\'}"; v="${v%\'}";; esac
-    export "$k=$v"
-  done < .env
+# Shared literal parser: no shell interpolation, including dollar signs in secrets.
+source "$ROOT/scripts/env.sh"
+load_env() { load_stack_env; }
+set_env() {
+  python3 "$ROOT/scripts/config-env.py" --set "$1" "$2"
+  export "$1=$2"
 }
-set_env() {  # set_env KEY VALUE - update .env in place
-  local k=$1 v=$2
-  if grep -q "^${k}=" .env; then
-    python3 - "$k" "$v" <<'PY'
-import sys
-k, v = sys.argv[1], sys.argv[2]
-lines = open(".env").read().split("\n")
-out = [f"{k}={v}" if l.startswith(k + "=") else l for l in lines]
-open(".env", "w", newline="\n").write("\n".join(out))
-PY
-  else
-    printf '%s=%s\n' "$k" "$v" >> .env
-  fi
-  export "$k=$v"
-}
+STAGE="${2:-all}"
+if [ "${1:-}" != "" ] && [ "${1:-}" != "--stage" ]; then die "usage: install.sh [--stage NAME]"; fi
+case "$STAGE" in all|secrets|users|dns|host|stack|certificate|panel|subscription|token|lanes|accounts|verify) ;; *) die "unknown install stage";; esac
+run_stage() { [ "$STAGE" = all ] || [ "$STAGE" = "$1" ]; }
 
 load_env
+NEW_CREDS=""
 : "${BASE_DOMAIN:?set BASE_DOMAIN in .env}"
 : "${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN in .env}"
 : "${PANEL_DOMAIN:?set PANEL_DOMAIN in .env}"
@@ -60,9 +46,18 @@ case "$ROLE" in
   *) die "ROLE='$ROLE' is not usable - set standalone, master or node in .env";;
 esac
 set_env ROLE "$ROLE"
+if [ "$ROLE" = node ]; then
+  : "${MANAGEMENT_BIND:=0.0.0.0}"
+else
+  : "${MANAGEMENT_BIND:=127.0.0.1}"
+fi
+: "${MANAGEMENT_PORT:=2053}"
+set_env MANAGEMENT_BIND "$MANAGEMENT_BIND"
+set_env MANAGEMENT_PORT "$MANAGEMENT_PORT"
 say "role: $ROLE"
 
 # ── 1. fill in anything left blank ──────────────────────────────────────────
+if run_stage secrets; then
 say "secrets"
 NEW_CREDS=""
 [ -n "${PANEL_PATH:-}" ] || { set_env PANEL_PATH "/panel-$(openssl rand -hex 6)"; ok "generated PANEL_PATH"; }
@@ -82,6 +77,9 @@ chmod 600 .env
 # users.txt is the editable input, USERS= in .env is what every script reads.
 # Resolve both into one answer HERE, so an unusable name fails now rather than
 # half way through provisioning with some lanes already created.
+fi
+
+if run_stage users; then
 say "users"
 if [ "$ROLE" = node ]; then
   warn "node role: no local users - users.txt lives on the master, clients"
@@ -93,16 +91,22 @@ else
 fi
 
 # ── 2. DNS must resolve here before ACME will work ──────────────────────────
+fi
+
+if run_stage dns; then
 say "dns"
 MYIP="$(curl -fsS -m 10 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}')"
 for h in "$PUBLIC_DOMAIN" "$PANEL_DOMAIN"; do
   got="$(getent ahostsv4 "$h" 2>/dev/null | awk '{print $1; exit}')"
   if [ "$got" = "$MYIP" ]; then ok "$h -> $got"
   elif [ -z "$got" ];      then die "$h does not resolve. Add an A record to $MYIP first."
-  else warn "$h resolves to $got, not $MYIP - ACME may fail"; fi
+  else die "$h resolves to $got, not $MYIP. Fix DNS before applying."; fi
 done
 
 # ── 3. host packages and kernel tuning ──────────────────────────────────────
+fi
+
+if run_stage host; then
 say "host"
 if ! command -v docker >/dev/null 2>&1; then
   curl -fsSL https://get.docker.com | sh >/dev/null 2>&1 || die "docker install failed"
@@ -131,13 +135,22 @@ if command -v ufw >/dev/null 2>&1; then
   SSH_PORTS="${SSH_PORTS:-22}"
   for p in $SSH_PORTS; do ufw allow "${p}/tcp" >/dev/null 2>&1 || true; done
   for p in 80/tcp 443/tcp 443/udp "${MTPROTO_PORT}/tcp" "${AWG_PORT}/udp"; do ufw allow "$p" >/dev/null 2>&1 || true; done
+  if [ "$ROLE" = node ]; then
+    ufw allow "${MANAGEMENT_PORT:-2053}/tcp" >/dev/null
+  fi
   ufw --force enable >/dev/null 2>&1 || true
   ok "ufw: ssh $(echo $SSH_PORTS | tr '
 ' ' '), 80, 443/tcp, 443/udp, ${MTPROTO_PORT}/tcp, ${AWG_PORT}/udp"
 fi
 warn "if your provider has its own firewall, open the same ports there - 443/udp especially"
+if [ "$ROLE" = node ]; then
+  warn "node management uses HTTPS port ${MANAGEMENT_PORT:-2053}; restrict provider ingress to the master's IP"
+fi
 
 # ── 4. bring the stack up ───────────────────────────────────────────────────
+fi
+
+if run_stage stack; then
 say "stack"
 # The 'proxy' network usually already exists on a host that was running
 # something behind a reverse proxy. Its subnet is exactly what Traefik trusts
@@ -151,6 +164,9 @@ if [ -n "$EXISTING" ] && [ "$EXISTING" != "$PROXY_SUBNET" ]; then
 fi
 ./bootstrap.sh
 
+fi
+
+if run_stage certificate; then
 say "certificate"
 for i in $(seq 1 60); do
   [ -f "shared/certs/certs/${CERT_BASENAME}.crt" ] && break
@@ -161,20 +177,39 @@ done
 ok "$(openssl x509 -in "shared/certs/certs/${CERT_BASENAME}.crt" -noout -subject -ext subjectAltName 2>/dev/null | tr '\n' ' ' | cut -c1-100)"
 
 # ── 5. panel: base path must match what Traefik forwards ────────────────────
+fi
+
+if run_stage panel; then
 say "panel"
 docker exec 3x-ui /app/x-ui setting -webBasePath "${PANEL_PATH}/" >/dev/null 2>&1
 docker exec 3x-ui /app/x-ui setting -username "$PANEL_USER" -password "$PANEL_PASS" >/dev/null 2>&1
 docker restart 3x-ui >/dev/null; sleep 10
+python3 - <<'PY'
+import sys
+sys.path.insert(0, "scripts")
+from panel import Panel, env_file
+Panel(env_file()).login()
+PY
+python3 "$ROOT/scripts/config-env.py" --mark-panel-ready
+if [ "$ROLE" = node ]; then
+  ./bootstrap.sh
+fi
 ok "panel at https://${PANEL_DOMAIN}${PANEL_PATH}/"
 
+fi
+
+if run_stage subscription; then
 # subscription URLs must be the public https ones, not the panel's internal
 # host:2096 default. A node serves no subscriptions at all - the master does.
 if [ "$ROLE" = node ]; then
   warn "node role: skipping subscription settings - the master serves them"
 else
-  python3 scripts/configure-subscription.py || warn "subscription settings not applied"
+  python3 scripts/configure-subscription.py
 fi
 
+fi
+
+if run_stage token; then
 # The node role reaches its panel only through a node-sync-scoped Bearer
 # token (scripts/mint-node-token.py): exactly the node-sync allowlist, never
 # the admin surface. The panel password stays a local bootstrap secret.
@@ -187,6 +222,9 @@ fi
 # A node gets no local lanes: the master pushes them onto it (stage 3), with
 # per-node Reality keys. Provisioning them here would bake in a second copy
 # of this host's keys and collide with the sync.
+fi
+
+if run_stage lanes; then
 say "lanes"
 if [ "$ROLE" = node ]; then
   warn "node role: no local lanes - the master pushes them (stage 3)"
@@ -200,24 +238,32 @@ else
     REALITY_PRIV="$REALITY_PRIV" REALITY_PUB="$REALITY_PUB" \
     python3 scripts/provision-inbounds.py
 
-  PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS" \
-    python3 scripts/add-mtproto.py || warn "mtproto lane not added"
+  if [[ ",${LANES:-vless-reality,trojan-httpupgrade,hysteria2,mtproto,amneziawg}," == *,mtproto,* ]]; then
+    PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS" python3 scripts/add-mtproto.py
+  fi
 
-  PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS" \
-    python3 scripts/add-amneziawg.py || warn "amneziawg lane not added"
+  if [[ ",${LANES:-vless-reality,trojan-httpupgrade,hysteria2,mtproto,amneziawg}," == *,amneziawg,* ]]; then
+    PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS" python3 scripts/add-amneziawg.py
+  fi
 
   docker restart 3x-ui >/dev/null; sleep 10
 fi
 
+fi
+
+if run_stage accounts; then
 say "accounts"
 if [ "$ROLE" = node ]; then
   warn "node role: no local accounts - clients arrive from the master (stage 4)"
 else
   PANEL_USER="$PANEL_USER" PANEL_PASS="$PANEL_PASS" \
-    python3 scripts/consolidate-clients.py --apply
+    python3 scripts/consolidate-clients.py --apply --managed-only
 fi
 
 # ── 7. verify ───────────────────────────────────────────────────────────────
+fi
+
+if run_stage verify; then
 say "verify"
 fail=0
 code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' "https://${PUBLIC_DOMAIN}/" || echo 000)
@@ -234,6 +280,11 @@ esac
 docker logs --tail 40 3x-ui 2>&1 | grep -q 'Failed to start' \
   && { warn "Xray failed to start - check: docker logs 3x-ui"; fail=1; } \
   || ok "Xray running"
+
+[ "$fail" = 0 ] || die "verification failed; fix the reported checks and resume"
+fi
+
+[ "$STAGE" = all ] || exit 0
 
 say "done"
 echo "  role       ${ROLE}"

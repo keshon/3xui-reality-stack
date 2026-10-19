@@ -23,7 +23,7 @@ services:
       # xray has no mtproto implementation, so this cannot crash the core.
       # NB: Traefik's 8443 is container-internal and never published, so the
       # host port is free despite the coincidence.
-      - "8443:8443/tcp"
+      - "${MTPROTO_PORT:-8443}:${MTPROTO_PORT:-8443}/tcp"
       # AmneziaWG. Runs inside the panel (amneziawg-go) as an in-process
       # userspace netstack - "embedded interface" in its log - so it needs NO
       # NET_ADMIN and NO /dev/net/tun. Verified: it starts and listens without

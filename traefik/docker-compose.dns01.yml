@@ -17,6 +17,8 @@ services:
       # NOTE: :443/tcp is deliberately NOT here any more - Xray owns it.
       #       :443/udp is Hysteria2.
       - "80:80"                     # ACME http-01 + redirect to https
+      # Independent management HTTPS; local-only except on traffic nodes.
+      - "${MANAGEMENT_BIND:-127.0.0.1}:${MANAGEMENT_PORT:-2053}:8443/tcp"
       # keep whatever extra TCP/UDP ports you actually use, e.g. amnezia/wg:
       # - "51227:51227/udp"
     environment:

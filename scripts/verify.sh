@@ -18,13 +18,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-# .env values for the shell-side checks (no-source parse, as everywhere).
-while IFS= read -r line || [ -n "$line" ]; do
-  case "$line" in ''|'#'*) continue;; *'='*) ;; *) continue;; esac
-  k=${line%%=*}; v=${line#*=}
-  case "$v" in '"'*'"') v=${v#\"}; v=${v%\"};; "'"*"'") v=${v#'}; v=${v%'};; esac
-  case "$k" in BASE_DOMAIN|PUBLIC_DOMAIN|PANEL_DOMAIN) export "$k=$v";; esac
-done < .env
+source "$ROOT/scripts/env.sh"
+load_stack_env
 
 echo "== reality keys and addresses (panel API) =="
 PANEL_USER="${PANEL_USER:?set PANEL_USER}" PANEL_PASS="${PANEL_PASS:?set PANEL_PASS}" \
@@ -38,10 +33,7 @@ sys.path.insert(0, "scripts")
 from panel import Panel, as_dict, container_ip, env_file, read_nodes
 
 e = env_file()
-try:
-    nodes = read_nodes(env=e)
-except SystemExit:
-    nodes = []
+nodes = read_nodes(env=e)
 expect = {"vless-reality": e["PUBLIC_DOMAIN"]}
 for n in nodes:
     expect[f"{n['name']}-reality"] = n["domain"]

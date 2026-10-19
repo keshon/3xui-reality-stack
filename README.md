@@ -78,6 +78,16 @@ self-signed default certificate.
 
 ## Install
 
+For guided configuration and resumable deployment, use the new
+[terminal console](docs/console.md) (`Python + Textual`). It imports existing
+configuration, normalizes paths, preserves literal credentials, and separates
+Save, Review and Apply. Apply runs on the Linux host; Windows supports editing
+and previewing plans. The manual installation below remains available for
+unmanaged checkouts; do not mix both workflows in the same deployment.
+
+Open it with `bash stack.sh` on Linux or `.\stack.cmd` on Windows. The first
+launch prepares its Python environment automatically; later launches reuse it.
+
 ```bash
 git clone https://github.com/keshon/3xui-reality-stack.git /opt/3xui-reality-stack
 cd /opt/3xui-reality-stack

@@ -24,6 +24,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -31,21 +32,15 @@ import uuid as uuidlib
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(ROOT, ".env")
+sys.path.insert(0, ROOT)
+from stackctl.envio import read_env
 
 
 def env_file(path=ENV_PATH):
     """Parse .env into a dict. Missing file -> {}, so the helpers that only
     need users.txt still run before .env exists. install.sh checks for .env
     itself; nothing here should turn a missing file into a traceback."""
-    out = {}
-    if not os.path.exists(path):
-        return out
-    for line in open(path, encoding="utf-8"):
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, v = line.split("=", 1)
-            out[k] = v.strip('"').strip("'")
-    return out
+    return read_env(path)
 
 
 class BadUsername(ValueError):
@@ -100,8 +95,7 @@ def users(env=None):
     path = users_file(env)
     if path:
         found = parse_users(open(path, encoding="utf-8").read())
-        if found:
-            return found
+        return found
     return parse_users(env.get("USERS", "user1"))
 
 
@@ -125,23 +119,25 @@ def read_nodes(path=None, env=None):
     env = env or env_file()
     path = path or nodes_file(env)
     if not path:
-        raise SystemExit("no nodes.txt - copy nodes.txt.example and fill it in")
+        if (env.get("ROLE") or "standalone") == "master":
+            raise ValueError("no nodes.txt on master - create it or use stack wizard")
+        return []
     out, seen = [], set()
     for lineno, raw in enumerate(open(path, encoding="utf-8"), 1):
         line = raw.split("#", 1)[0].split()
         if not line:
             continue
         if len(line) != 4:
-            raise SystemExit(
+            raise ValueError(
                 f"{path} line {lineno}: want "
                 f"'<name> <panel-url> <api-token> <public-domain>'")
         name, url, token, domain = line
         if not re.match(r"^[a-z0-9_]{1,24}$", name):
-            raise SystemExit(
+            raise ValueError(
                 f"{path} line {lineno}: bad node name {name!r} - use "
                 f"1-24 chars of a-z, 0-9 or '_' (it becomes the remark prefix)")
         if name in seen:
-            raise SystemExit(f"{path} line {lineno}: duplicate node {name!r}")
+            raise ValueError(f"{path} line {lineno}: duplicate node {name!r}")
         seen.add(name)
         out.append({"name": name, "url": url, "token": token,
                     "domain": domain})
@@ -194,6 +190,7 @@ def as_dict(v):
 class Panel:
     def __init__(self, env=None):
         env = env or env_file()
+        self.env = env
         ip = container_ip()
         if not ip:
             raise SystemExit("3x-ui container is not running")
@@ -209,8 +206,9 @@ class Panel:
         return m.group(1)
 
     def req(self, path, data=None, as_json=False):
+        origin = urllib.parse.urlsplit(self.base)
         h = {"Referer": self.base + "/",
-             "Origin": self.base.rsplit("/", 1)[0],
+             "Origin": f"{origin.scheme}://{origin.netloc}",
              "X-CSRF-TOKEN": self._csrf()}
         body = None
         if data is not None:
@@ -223,21 +221,26 @@ class Panel:
 
     def post(self, path, body=None, as_json=True):
         try:
-            return json.loads(self.req(path, body if body is not None else {},
-                                       as_json).read())
+            result = json.loads(self.req(path, body if body is not None else {},
+                                         as_json).read())
+            self._client_emails = None
+            return result
         except urllib.error.HTTPError as ex:
             return {"success": False,
                     "msg": f"HTTP {ex.code}: {ex.read().decode()[:250]}"}
 
     def get(self, path):
         try:
-            return json.loads(self.req(path).read())
-        except urllib.error.HTTPError:
-            return {"success": False, "obj": None}
+            result = json.loads(self.req(path).read())
+        except urllib.error.HTTPError as ex:
+            raise RuntimeError(f"Panel read failed: HTTP {ex.code}; no changes planned") from None
+        if not isinstance(result, dict) or not result.get("success"):
+            raise RuntimeError("Panel read failed; no changes planned")
+        return result
 
     def login(self, user=None, password=None):
-        user = user or os.environ.get("PANEL_USER")
-        password = password or os.environ.get("PANEL_PASS")
+        user = user or self.env.get("PANEL_USER") or os.environ.get("PANEL_USER")
+        password = password or self.env.get("PANEL_PASS") or os.environ.get("PANEL_PASS")
         d = json.loads(self.req("/login", {"username": user,
                                            "password": password}).read())
         if not d.get("success"):
@@ -252,7 +255,10 @@ class Panel:
         return next((i for i in self.inbounds() if i["remark"] == remark), None)
 
     def add_inbound(self, fields):
-        return self.post("/panel/api/inbounds/add", fields)
+        result = self.post("/panel/api/inbounds/add", fields)
+        if not result.get("success"):
+            raise RuntimeError("Panel rejected inbound creation; inspect panel logs locally")
+        return result
 
     def update_inbound(self, inbound, **overrides):
         f = {k: inbound[k] for k in ("remark", "listen", "port", "protocol",
@@ -273,12 +279,23 @@ class Panel:
         has changed shape between releases, whereas this is the panel's own
         published view of it.
         """
-        return self.get("/panel/api/clients/list").get("obj") or []
+        rows = self.get("/panel/api/clients/list").get("obj") or []
+        if not isinstance(rows, list):
+            raise RuntimeError("Panel returned an invalid client inventory")
+        self._client_emails = {c["email"] for c in rows if c.get("email")}
+        return rows
 
     def emails(self):
         return [c["email"] for c in self.clients() if c.get("email")]
 
     def client(self, email):
+        # Missing users are established through a successful full inventory,
+        # not through localized success:false / arbitrary HTTP failures from
+        # the get endpoint. A failed read must never trigger a create.
+        if getattr(self, "_client_emails", None) is None:
+            self.clients()
+        if email not in self._client_emails:
+            return None
         return self.get(f"/panel/api/clients/get/{email}").get("obj")
 
     def update_client(self, email, client):
