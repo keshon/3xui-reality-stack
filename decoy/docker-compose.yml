@@ -18,6 +18,11 @@ services:
     image: nginx:1.29-alpine
     container_name: decoy
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks: [proxy]
     volumes:
       - ./site:/usr/share/nginx/html:ro

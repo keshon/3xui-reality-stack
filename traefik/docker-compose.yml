@@ -9,6 +9,11 @@ services:
     image: traefik:v3.7.12          # pinned. never :latest on a box you care about.
     container_name: traefik
     restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks: [proxy]
     ports:
       # Independent management HTTPS; local-only except on traffic nodes.
@@ -42,12 +47,12 @@ services:
       #   xver=0       <->  delete these two lines
       - "--entrypoints.websecure.proxyProtocol.trustedIPs=${PROXY_SUBNET}"
       - "--entrypoints.websecure.forwardedHeaders.trustedIPs=${PROXY_SUBNET}"
-      # THE FIX for 10-second tunnels: no timeouts on long-lived proxy streams.
-      # Traefik v3 defaults readTimeout=60s / idleTimeout=180s, which guillotines
-      # httpupgrade and xhttp stream-up sessions.
-      - "--entrypoints.websecure.transport.respondingTimeouts.readTimeout=0"
+      # Bound incomplete TLS/HTTP requests. HTTPUpgrade connections are
+      # hijacked after the upgrade; validate long tunnels when changing this.
+      # writeTimeout stays unlimited for streaming responses.
+      - "--entrypoints.websecure.transport.respondingTimeouts.readTimeout=30s"
       - "--entrypoints.websecure.transport.respondingTimeouts.writeTimeout=0"
-      - "--entrypoints.websecure.transport.respondingTimeouts.idleTimeout=0"
+      - "--entrypoints.websecure.transport.respondingTimeouts.idleTimeout=180s"
       - "--entrypoints.websecure.transport.lifeCycle.graceTimeOut=30s"
 
       # ── providers ────────────────────────────────────────────────────────

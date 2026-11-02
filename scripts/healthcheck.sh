@@ -11,8 +11,8 @@
 # UDP semantics, stated honestly: QUIC answers nothing without a valid
 # handshake, so all we can observe is ICMP port-unreachable surfacing as
 # ECONNREFUSED on a connected socket. Refused = FAIL (nothing listens);
-# timeout = pass (listener or filtered - indistinguishable, and the TCP
-# plus master-status steps cover the rest).
+# timeout = unverified (listener or filtered are indistinguishable).
+# Authenticated Xray transfers are checked separately below.
 #
 # Certificate: FAIL if expired or <14 days left, warn if <30.
 # Master status: `nodes.py test <name>` (probe) must report online.
@@ -34,13 +34,23 @@ report=""
 say() { printf '%-4s %-12s %s\n' "$1" "$2" "$3"; report="$report$1 $2 $3
 "; }
 
-if [ ! -f nodes.txt ]; then
+if ! python3 -c 'import sys; sys.path.insert(0, "scripts"); from panel import xray_healthy; sys.exit(0 if xray_healthy() else 1)'; then
+  say FAIL local "Xray process unavailable"; fail=1
+fi
+
+if [ ! -f "${NODES_FILE:-nodes.txt}" ]; then
   if [ "${ROLE:-standalone}" = master ]; then
     echo "FAIL: master has no nodes.txt"; exit 1
   fi
-  echo "no managed nodes configured; this check does not cover local traffic"
-  exit 0
 fi
+
+node_records() {
+  if [ -f "${NODES_FILE:-nodes.txt}" ]; then
+    cat "${NODES_FILE:-nodes.txt}"
+  else
+    printf 'local - - %s\n' "${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN}"
+  fi
+}
 
 while IFS= read -r raw || [ -n "$raw" ]; do
   line=${raw%%#*}
@@ -50,7 +60,7 @@ while IFS= read -r raw || [ -n "$raw" ]; do
   [ -n "$domain" ] || { say FAIL "$name" "nodes.txt line has no public-domain"; fail=1; continue; }
 
   # ── TCP 443 ──
-  if timeout 10 bash -c "cat < /dev/null > /dev/tcp/$domain/443" 2>/dev/null; then
+  if timeout 10 bash -c 'cat < /dev/null > /dev/tcp/$1/443' _ "$domain" 2>/dev/null; then
     say OK "$name" "tcp/443 open"
   else
     say FAIL "$name" "tcp/443 unreachable"; fail=1
@@ -81,7 +91,7 @@ PY
 ) && say WARN "$name" "$udp_out (unverified; protocol handshake required)" || { say FAIL "$name" "$udp_out"; fail=1; }
 
   # ── certificate lifetime on the data path ──
-  end=$(echo | openssl s_client -connect "$domain:443" -servername "$domain" 2>/dev/null \
+  end=$(echo | timeout 15 openssl s_client -connect "$domain:443" -servername "$domain" 2>/dev/null \
         | openssl x509 -noout -enddate 2>/dev/null | cut -d= -f2)
   if [ -z "$end" ]; then
     say FAIL "$name" "no certificate on $domain:443"; fail=1
@@ -99,8 +109,8 @@ PY
   fi
 
   # ── master status ──
-  if [ -n "${PANEL_USER:-}" ] && [ -n "${PANEL_PASS:-}" ]; then
-    if python3 scripts/nodes.py test "$name" >/dev/null 2>&1; then
+  if [ "$name" != local ] && [ -n "${PANEL_USER:-}" ] && [ -n "${PANEL_PASS:-}" ]; then
+    if timeout 60 python3 scripts/nodes.py test "$name" >/dev/null 2>&1; then
       say OK "$name" "master: online"
     else
       say FAIL "$name" "master: not online (see nodes.py test $name)"; fail=1
@@ -108,11 +118,21 @@ PY
   else
     say WARN "$name" "master status skipped (no PANEL_USER/PANEL_PASS)"
   fi
-done < nodes.txt
+done < <(node_records)
+
+if [ "${ROLE:-standalone}" != node ]; then
+  if timeout 180 python3 scripts/probe-tunnels.py; then
+    say OK local "published Xray lanes passed authenticated transfers"
+  else
+    say FAIL local "authenticated transfer failed; compare another vantage point and target URL"; fail=1
+  fi
+else
+  say WARN local "node lanes need authenticated probes from master/external host"
+fi
 
 echo "---"
 if [ "$fail" = 0 ]; then
-  echo "checked paths reachable; UDP protocol health remains unverified"
+  echo "checked paths reachable; MTProto and AmneziaWG protocol health remain unverified"
 else
   echo "PROBLEMS FOUND"
   if [ -n "${TELEGRAM_BOT_TOKEN:-}" ] && [ -n "${TELEGRAM_CHAT_ID:-}" ]; then

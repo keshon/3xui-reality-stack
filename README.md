@@ -206,6 +206,7 @@ is one Xray process, one bad inbound stops every lane at once.
 | [docs/gotchas.md](docs/gotchas.md) | Components that accept configuration they cannot run |
 | [docs/reality.md](docs/reality.md) | Choosing `target` and `serverNames` |
 | [docs/diagnosing.md](docs/diagnosing.md) | Post-deploy checks, and reading failures that log nothing |
+| [docs/resilience.md](docs/resilience.md) | Handshake deadlines, authenticated probes, bounded snapshots and source upgrades |
 | [docs/other-apps.md](docs/other-apps.md) | Putting your own sites behind the same proxy |
 
 ## Layout

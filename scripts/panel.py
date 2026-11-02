@@ -148,7 +148,7 @@ def container_ip(name="3x-ui"):
     return subprocess.run(
         ["docker", "inspect", "-f",
          "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", name],
-        capture_output=True, text=True).stdout.strip()
+        capture_output=True, text=True, timeout=10).stdout.strip()
 
 
 def xray(*args):
@@ -329,13 +329,22 @@ class Panel:
 
 
 def xray_healthy(tail=40):
-    """True unless Xray is refusing to start.
+    """Check current container/process state; tunnel health needs a real probe.
 
-    Worth checking after ANY inbound change: the panel's validation is weaker
-    than Xray's runtime, it is a single Xray process, and one bad inbound takes
-    every lane down with it.
+    ``tail`` remains accepted for existing callers. Historical logs cannot
+    establish whether the core is running now, or whether Docker even worked.
     """
-    r = subprocess.run(["docker", "logs", "--tail", str(tail), "3x-ui"],
-                       capture_output=True, text=True)
-    out = r.stdout + r.stderr
-    return "Failed to start" not in out and "Failure in running xray-core" not in out
+    try:
+        r = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", "3x-ui"],
+                           capture_output=True, text=True, timeout=10)
+        if r.returncode or r.stdout.strip() != "true":
+            return False
+        # Docker needs the PID column to filter host ps output by container.
+        r = subprocess.run(["docker", "top", "3x-ui", "-eo", "pid,comm"],
+                           capture_output=True, text=True, timeout=10)
+        return r.returncode == 0 and any(
+            len(fields) == 2 and fields[0].isdigit()
+            and re.fullmatch(r"xray(?:-linux-[\w-]+)?", fields[1])
+            for fields in (line.split() for line in r.stdout.splitlines()))
+    except (OSError, subprocess.TimeoutExpired):
+        return False

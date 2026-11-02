@@ -121,7 +121,7 @@ PY
 echo "== fallback certificates per node =="
 fail=0
 check_cert() {  # $1 = domain
-  subj=$(echo | openssl s_client -connect "$1:443" -servername "$1" 2>/dev/null \
+  subj=$(echo | timeout 15 openssl s_client -connect "$1:443" -servername "$1" 2>/dev/null \
          | openssl x509 -noout -subject 2>/dev/null || true)
   case "$subj" in
     *"$BASE_DOMAIN"*) echo "  ok $1: fallback serves your own certificate";;

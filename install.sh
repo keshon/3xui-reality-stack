@@ -269,7 +269,7 @@ fail=0
 code=$(curl -s -m 10 -o /dev/null -w '%{http_code}' "https://${PUBLIC_DOMAIN}/" || echo 000)
 [ "$code" = 200 ] && ok "decoy site answers 200" || { warn "decoy returned $code"; fail=1; }
 
-subj=$(echo | openssl s_client -connect "${PUBLIC_DOMAIN}:443" -servername "$PUBLIC_DOMAIN" 2>/dev/null \
+subj=$(echo | timeout 15 openssl s_client -connect "${PUBLIC_DOMAIN}:443" -servername "$PUBLIC_DOMAIN" 2>/dev/null \
        | openssl x509 -noout -subject 2>/dev/null || true)
 case "$subj" in
   *"$BASE_DOMAIN"*) ok "Reality fallback serves your own certificate";;
@@ -277,9 +277,11 @@ case "$subj" in
   *)                warn "unexpected certificate: ${subj:-none}"; fail=1;;
 esac
 
-docker logs --tail 40 3x-ui 2>&1 | grep -q 'Failed to start' \
-  && { warn "Xray failed to start - check: docker logs 3x-ui"; fail=1; } \
-  || ok "Xray running"
+if python3 -c 'import sys; sys.path.insert(0, "scripts"); from panel import xray_healthy; sys.exit(0 if xray_healthy() else 1)'; then
+  ok "Xray process running (authenticated transfer is checked separately)"
+else
+  warn "Xray process unavailable - check Docker and the core"; fail=1
+fi
 
 [ "$fail" = 0 ] || die "verification failed; fix the reported checks and resume"
 fi

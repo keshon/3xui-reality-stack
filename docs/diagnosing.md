@@ -1,6 +1,6 @@
 # Diagnosing
 
-Three failure classes, opposite fixes. One measurement separates them. Run it
+Several failure classes can produce similar symptoms. Start with a measurement
 **from inside the restricted network** — from anywhere else it tells you
 nothing about the censor, including from behind another VPN.
 
@@ -8,11 +8,11 @@ nothing about the censor, including from behind another VPN.
 openssl s_client -connect <SERVER_IP>:443 -servername <PUBLIC_DOMAIN> -tls1_3 -msg
 ```
 
-| What you see | Class | What to fix |
+| What you see | Possible causes | Next check |
 |---|---|---|
-| RST immediately after ClientHello | SNI / IP filtering | domain and IP choice; protocol changes will not help |
-| Handshake OK, RST after ~5–50 KB | TLS-in-TLS behavioural detection | VLESS Encryption, padding, or move to QUIC |
-| Handshake OK, no RST, throughput strangles | ASN / IP-range throttling | change hosting provider; nothing on the server helps |
+| RST immediately after ClientHello | filtering, TLS rejection, or a server/middlebox error | compare server capture and another network |
+| Handshake OK, reset after some data | filtering, application failure, or a timeout | repeat with different targets and authenticated transports |
+| Handshake OK, no RST, throughput stalls | packet loss, filtering, MTU, or resource pressure | compare captures, connection counts and server health |
 
 Note this only exercises Reality's **fallback** path — `openssl`'s ClientHello
 has no browser fingerprint and carries no Reality auth, so the server relays it
@@ -102,6 +102,9 @@ segment. It is a client-side setting — the server only publishes it in the
 subscription as `fp=` and never checks it — so clients must re-read the
 subscription for it to take effect.
 
+A fingerprint change does not clear already retained handshakes. See
+[resilience.md](resilience.md) for finite fallback deadlines and snapshots.
+
 Two things this is *not*, and the same capture rules both out. If the address
 were blocked, the SYN would not be answered and the other lanes would die
 with it. If Reality were rejecting the handshake, the connection would fall
@@ -136,6 +139,6 @@ negotiated MSS; its ping-based section is kept only as a labelled footnote.
 ## Comparing servers
 
 Run `scripts/triage.sh` on each and diff. If two servers run an identical
-configuration and behave differently, the difference is **network** — IP
-reputation, peering, or routing — not configuration, and no amount of protocol
-work will fix it.
+configuration and behave differently, compare both network paths and runtime
+state: connection counts, memory pressure, DNS, core version and uptime. Equal
+configuration alone does not establish a network cause.

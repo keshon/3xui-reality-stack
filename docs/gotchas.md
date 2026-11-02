@@ -302,8 +302,11 @@ entrypoint — change one without the other and handshakes break.
   `tls.domains`, so a wildcard declared at the entrypoint is silently ignored
   and you get one certificate per hostname. Configure TLS only at the
   entrypoint.
-- Default `respondingTimeouts` (`readTimeout` 60s, `idleTimeout` 180s)
-  guillotine long-lived tunnels. Set them to 0 on the tunnel entrypoint.
+- Keep a finite `respondingTimeouts.readTimeout` (30s here): it also bounds
+  incomplete TLS ClientHellos before HTTP routing. `writeTimeout=0` allows
+  streaming responses; `idleTimeout=180s` bounds idle HTTP keep-alive sockets.
+  HTTPUpgrade tunnels are hijacked after upgrade. Verify a transfer lasting
+  longer than the read timeout before changing these settings.
 - `ldez/traefik-certs-dumper` panics on Traefik 3.7 acme.json
   (`unsupported key type: ''` — it wants an `Account.KeyType` field Traefik no
   longer writes). `traefik/dump-certs.py` replaces it.
