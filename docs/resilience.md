@@ -56,6 +56,20 @@ The observer never restarts services or sends messages. Its service exits
 nonzero on a failed probe. A target website failure can also fail the probe;
 compare another target and network before taking recovery action.
 
+`stack doctor`, the observer and source-upgrade verification share the same
+process, fallback HTTPS and authenticated-transfer checks in `stackctl/health.py`.
+Doctor additionally checks the panel and published account configuration.
+
+## Host policy
+
+`bash scripts/host-tune.sh --print` previews the host policy without applying
+it. The policy keeps QUIC buffer ceilings, TCP MTU probing and BBR/fq when
+available. It leaves TCP memory budgets, default socket buffers, connection
+tracking, queue sizes and global descriptor limits to the kernel. Updating
+source does not change live sysctls. Applying the smaller policy removes old
+overrides from its configuration file; removed settings keep their current
+kernel values until explicitly reset or the host reboots.
+
 The installer also configures daily Traefik file-log rotation with a 20 MiB
 size trigger and five rotations. `copytruncate` avoids restarting Traefik but
 can lose a small amount of logging during rotation. The size is checked when
@@ -63,6 +77,10 @@ logrotate runs, not a hard cap. Compose bounds Docker stdout logs to three
 10 MiB files per configured service, effective when that container is recreated.
 
 ## Upgrade an older deployment
+
+For deployments with a reviewed source baseline, use the
+[source upgrade command](upgrades.md). The manual procedure below is for
+establishing that baseline on older deployments.
 
 Back up the old source, `.env`, account lists, certificate state and panel
 database before replacing source files. Use SQLite's backup API for a live

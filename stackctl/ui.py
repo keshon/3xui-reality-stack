@@ -271,7 +271,7 @@ class Review(Screen):
 
     def on_mount(self):
         try:
-            text = "Read-only checks. Runs on the deployed Linux host; real client handshakes remain a separate check." if self.doctor else plan_text(self.engine)
+            text = "Read-only panel, process, fallback HTTPS and authenticated Xray transfer checks. MTProto/AmneziaWG remain untested." if self.doctor else plan_text(self.engine)
             self.query_one("#plan", Static).update(text)
             pending = self.app.store.json(self.app.store.journal_path, {})
             self.query_one("#recover", Button).display = bool(not self.doctor and pending and pending.get("status") not in ("complete", "editable"))

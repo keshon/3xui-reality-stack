@@ -16,6 +16,9 @@ ok()   { printf '   \033[32mok\033[0m   %s\n' "$1"; }
 warn() { printf '   \033[33mwarn\033[0m %s\n' "$1"; }
 die()  { printf '\n\033[31mfatal\033[0m %s\n' "$1" >&2; exit 1; }
 
+if { [ -f .stack/config.json ] || [ -f .stack/adoption.json ]; } && [ "${STACK_MANAGED_APPLY:-}" != 1 ]; then
+  die "managed installation: use stack plan / stack apply; install.sh is the engine's stage runner"
+fi
 [ "$(id -u)" = 0 ] || die "run as root (docker, sysctl and ufw all need it)"
 [ -f .env ] || die "no .env - copy .env.example to .env and fill it in"
 

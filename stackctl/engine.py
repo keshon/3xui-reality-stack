@@ -74,6 +74,10 @@ class Engine:
         self.lock_fd = None
 
     def plan(self, candidate=None):
+        if self.store.json(self.store.directory / "adoption.json", {}).get("status") == "preparing":
+            raise ValueError("An interrupted adoption needs stack adopt before configuration apply.")
+        if self.store.json(self.store.directory / "upgrade.json", {}).get("status") in ("applying", "rolling_back", "rollback_failed"):
+            raise ValueError("An interrupted source upgrade needs stack rollback --backup PATH before configuration apply.")
         if candidate is None and not self.store.config_path.exists():
             raise ValueError("Save your configuration with 'stack wizard' first.")
         config = normalize(candidate if candidate is not None else self.store.load())
@@ -263,6 +267,7 @@ class Engine:
         env = os.environ.copy()
         env.update(config["env"])
         env["PYTHONUNBUFFERED"] = "1"
+        env["STACK_MANAGED_APPLY"] = "1"
         # Use the venv interpreter for Bash's python3 calls as well.
         env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
         command = self.command(step, config)

@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "panel_image": "ghcr.io/mhsanaei/3x-ui:v3.7.0",
+  "xray_versions": ["26.7.28"],
+  "traefik_image": "traefik:v3.7.12"
+}

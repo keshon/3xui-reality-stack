@@ -257,12 +257,16 @@ class Store:
             Engine(self).plan(candidate=config)
             # Preserve the original inputs exactly once for migration recovery.
             if not self.config_path.exists():
-                for name in (".env", "users.txt", "nodes.txt"):
-                    original = self.root / name
-                    if original.is_file():
-                        atomic_write(self.directory / "imported" / name, original.read_text(encoding="utf-8-sig"))
+                self.preserve_inputs()
             self.write_json(self.config_path, config)
         return config
+
+    def preserve_inputs(self):
+        for name in (".env", "users.txt", "nodes.txt"):
+            original = self.root / name
+            saved = self.directory / "imported" / name
+            if original.is_file() and not saved.exists():
+                atomic_write(saved, original.read_text(encoding="utf-8-sig"))
 
     def outputs(self, config: dict) -> dict[str, str]:
         return {

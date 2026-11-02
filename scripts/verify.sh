@@ -134,6 +134,6 @@ while IFS= read -r raw || [ -n "$raw" ]; do
   set -- $line
   [ "$#" -eq 0 ] && continue
   check_cert "${4:?nodes.txt line without public-domain}"
-done < nodes.txt
+done < <(if [ -f "${NODES_FILE:-nodes.txt}" ]; then cat "${NODES_FILE:-nodes.txt}"; fi)
 [ "$fail" = 0 ] || exit 1
 echo "ALL CHECKS PASSED"

@@ -34,6 +34,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(ROOT, ".env")
 sys.path.insert(0, ROOT)
 from stackctl.envio import read_env
+from stackctl.health import core_running
 
 
 def env_file(path=ENV_PATH):
@@ -334,17 +335,4 @@ def xray_healthy(tail=40):
     ``tail`` remains accepted for existing callers. Historical logs cannot
     establish whether the core is running now, or whether Docker even worked.
     """
-    try:
-        r = subprocess.run(["docker", "inspect", "-f", "{{.State.Running}}", "3x-ui"],
-                           capture_output=True, text=True, timeout=10)
-        if r.returncode or r.stdout.strip() != "true":
-            return False
-        # Docker needs the PID column to filter host ps output by container.
-        r = subprocess.run(["docker", "top", "3x-ui", "-eo", "pid,comm"],
-                           capture_output=True, text=True, timeout=10)
-        return r.returncode == 0 and any(
-            len(fields) == 2 and fields[0].isdigit()
-            and re.fullmatch(r"xray(?:-linux-[\w-]+)?", fields[1])
-            for fields in (line.split() for line in r.stdout.splitlines()))
-    except (OSError, subprocess.TimeoutExpired):
-        return False
+    return core_running()

@@ -6,6 +6,10 @@ cd "$(dirname "$0")"
 [ -f .env ] || { echo "!! copy .env.example to .env and fill it in first"; exit 1; }
 
 ROOT="$(pwd)"
+if { [ -f .stack/config.json ] || [ -f .stack/adoption.json ]; } && [ "${STACK_MANAGED_APPLY:-}" != 1 ]; then
+  echo "managed installation: use stack plan / stack apply instead of bootstrap.sh" >&2
+  exit 1
+fi
 source "$ROOT/scripts/env.sh"
 load_stack_env
 

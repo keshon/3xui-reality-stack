@@ -25,6 +25,10 @@ Dependency changes in `pyproject.toml` trigger setup again. Interrupted or
 failed setup can be retried with the same command. No activation is needed.
 `bash stack.sh resume` continues an interrupted deployment.
 
+Source updates use `stack upgrade --from /path/to/release`; the default is a
+preview. See [source upgrades and rollback](upgrades.md). Configuration Apply
+and source Upgrade are separate operations and share the same deployment lock.
+
 On Windows, editing and previewing plans also works:
 
 ```powershell
@@ -40,6 +44,22 @@ This checkout must stay present: the package invokes its Compose files and
 deployment scripts. To select another checkout, use `stack --root /path`.
 
 ## Your first visit
+
+For an already running installation, first preview adoption:
+
+```bash
+python3 -m stackctl adopt
+python3 -m stackctl adopt --yes
+```
+
+Adoption verifies the existing panel/subscriptions and authenticated transfers
+before recording a managed baseline. It does not provision accounts, rewrite
+`.env` or user/node files, restart services, or tune the host. Only users in the
+existing account inputs become managed; other panel accounts stay untouched.
+Interrupted adoption can be resumed with the same command. If existing literal
+settings require normalization, the command stops for review.
+
+For a fresh installation, use the following setup:
 
 1. Open **Server settings**. Choose Single server, Master + traffic, or Traffic
    node. Enter DNS zone, public/admin hostnames, ACME email and Cloudflare token.
@@ -84,7 +104,9 @@ schema, literal JSON strings). The console initially imports existing `.env`,
 under `.stack/imported/`. Unknown environment settings are preserved.
 
 Apply generates `.env`, `users.txt`, and `nodes.txt` from that configuration.
-Do not alternate manual edits/legacy installers with managed console runs.
+Direct `install.sh` and `bootstrap.sh` runs are blocked on managed installations;
+the engine invokes their internal stages. Do not alternate manual edits with
+managed console runs.
 Changes to generated files after an apply stop the next operation rather than
 being silently overwritten. To move back to legacy/manual management, use a
 separate checkout and the saved original files; review live panel state first.
@@ -162,10 +184,11 @@ use Doctor to check live health separately. Doctor reads the deployed files,
 not pending configuration edits, and holds the same operation lock.
 
 Final acceptance checks required lanes, users and attachments, subscriptions,
-distinct Reality keys and expected fallback certificates. They do not prove
-client-side tunnel operation on your access network. A real connection per
-protocol remains the final acceptance check. Generic UDP timeouts are reported
-as unverified rather than healthy.
+distinct Reality keys and expected fallback certificates. Doctor additionally
+checks the core process, verified fallback HTTPS and authenticated Reality,
+Trojan and Hysteria2 transfers from the server. These do not prove operation
+on your access network. MTProto/AmneziaWG handshakes remain untested; generic
+UDP timeouts remain unverified.
 
 ## Deliberate limits
 
@@ -190,10 +213,10 @@ as unverified rather than healthy.
   on that VPS, then register it on the master.
 - The console is not high availability. Master failure still stops
   subscription updates. SSH is the independent repair path when Xray fails.
-- Backup/restore automation and consistent SQLite snapshots are not implemented
-  by this release. Existing `backup.sh` is a legacy live-directory archive,
-  not a guaranteed consistent database snapshot. Back up `.stack/` too, and
-  stop 3x-ui while capturing its DB until a tested snapshot/restore path exists.
+- Source upgrades retain consistent SQLite snapshots and support source/service
+  rollback; see [upgrades](upgrades.md). `scripts/backup.sh` uses the same state
+  snapshot routine and includes managed settings. Database restoration stays
+  manual; see [backups](backups.md).
 
 ## Development checks
 

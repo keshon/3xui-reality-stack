@@ -115,14 +115,14 @@ PY
     else
       say FAIL "$name" "master: not online (see nodes.py test $name)"; fail=1
     fi
-  else
+  elif [ "$name" != local ]; then
     say WARN "$name" "master status skipped (no PANEL_USER/PANEL_PASS)"
   fi
 done < <(node_records)
 
 if [ "${ROLE:-standalone}" != node ]; then
-  if timeout 180 python3 scripts/probe-tunnels.py; then
-    say OK local "published Xray lanes passed authenticated transfers"
+  if timeout 225 python3 -m stackctl.health; then
+    say OK local "core, fallback HTTPS and published Xray lanes passed"
   else
     say FAIL local "authenticated transfer failed; compare another vantage point and target URL"; fail=1
   fi
