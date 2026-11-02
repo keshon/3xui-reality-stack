@@ -28,7 +28,8 @@ class UpgradeError(ValueError):
 PROTECTED = CONFIG_FILES
 SOURCE_ROOTS = {"stackctl", "scripts", "tests", "docs", "traefik", "decoy", "xui"}
 SOURCE_FILES = {".env.example", ".gitattributes", ".gitignore", "README.md", "LICENSE", "pyproject.toml",
-                "install.sh", "bootstrap.sh", "stack.sh", "stack.cmd", "users.txt.example", "nodes.txt.example", "compatibility.json"}
+                "install.sh", "bootstrap.sh", "stack.sh", "stack.cmd", "users.txt.example", "nodes.txt.example", "compatibility.json",
+                ".agents/skills/docs-pattern/SKILL.md"}
 FORBIDDEN = ("traefik/data", "traefik/dynamic/tls.yml", "xui/db", "decoy/site")
 PROJECTS = ("traefik", "decoy", "xui")
 

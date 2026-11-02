@@ -163,7 +163,7 @@ def test_reviewed_plan_cannot_apply_changed_configuration(deployed):
     assert (root / "README.md").read_text() == "old source\n"
 
 
-@pytest.mark.parametrize("name", ["../README.md", "/etc/passwd", "xui/db/x-ui.db", "decoy/site/index.html", "traefik/dynamic/tls.yml", ".env", "stackctl/../../escape", "scripts\\escape.py"])
+@pytest.mark.parametrize("name", ["../README.md", "/etc/passwd", "xui/db/x-ui.db", "decoy/site/index.html", "traefik/dynamic/tls.yml", ".env", "stackctl/../../escape", "scripts\\escape.py", ".agents/private.json", ".agents/skills/other/SKILL.md"])
 def test_manifest_rejects_private_or_traversal_paths(deployed, name):
     _, source, _, _ = deployed
     manifest = json.loads((source / "RELEASE-MANIFEST.json").read_text())
@@ -171,6 +171,20 @@ def test_manifest_rejects_private_or_traversal_paths(deployed, name):
     (source / "RELEASE-MANIFEST.json").write_text(json.dumps(manifest))
     with pytest.raises(UpgradeError):
         Release(source)
+
+
+def test_upgrade_carries_repository_docs_skill_and_rollback_removes_it(deployed):
+    root, source, upgrade, _ = deployed
+    relative = Path(".agents/skills/docs-pattern/SKILL.md")
+    (source / relative).parent.mkdir(parents=True)
+    (source / relative).write_text("# Repository documentation pattern\n")
+    inventory(source)
+    plan = upgrade.plan(source)
+    assert relative.as_posix() in plan["changed"]
+    backup = upgrade.apply(source, plan["token"], emit=lambda _: None)
+    assert (root / relative).read_bytes() == (source / relative).read_bytes()
+    upgrade.rollback(backup)
+    assert not (root / relative).exists()
 
 
 def test_damaged_release_and_dependency_changes_are_refused(deployed):

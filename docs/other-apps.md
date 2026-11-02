@@ -11,10 +11,12 @@ What changes is only the label vocabulary.
 | name | port | notes |
 |---|---|---|
 | `web` | `:80` | published; redirects everything to `https://…:443` |
-| `websecure` | `:8443` | **internal**, never published; TLS terminated here |
+| `websecure` | `:8443` | TLS terminated here; mapped separately by the management binding |
 
-`websecure` is where every app router goes. It is not reachable from outside
-the host — Xray dials it — so nothing is exposed by not publishing it.
+`websecure` is where app routers go. Public HTTPS reaches it through Xray's
+fallback. The management port also maps to this entrypoint; on nodes that
+binding defaults to all interfaces. Restrict management access appropriately.
+See the [listener map](architecture.md#listeners).
 
 ## The minimum an app needs
 
@@ -78,7 +80,8 @@ other. Two conditions:
   straight back — a redirect loop.
 * it must be an ordinary HTTP app. Cloudflare terminates TLS and does not
   forward UDP, so `PUBLIC_DOMAIN` and `PANEL_DOMAIN` must stay **DNS-only**,
-  grey cloud. Proxying those breaks every tunnel lane.
+  grey cloud. Keep traffic endpoints direct; an HTTP CDN proxy cannot forward
+  Reality authentication or the UDP transports.
 
 ## What not to put here
 

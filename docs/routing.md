@@ -1,154 +1,100 @@
 # Routing policy
 
-Two rules, applied in Xray's routing table so they cover every lane at once —
-including AmneziaWG, which reaches the internet through a loopback SOCKS5
-inbound into Xray rather than around it.
+`scripts/routing.py` manages the local panel's Xray routing template and optional
+HAPP subscription routing headers. Applying it can restart the shared runtime;
+back up and review the current template before changing routing.
 
 ```bash
-python3 scripts/routing.py --show    # what is installed
-python3 scripts/routing.py --test    # ask Xray where it would send things
-python3 scripts/routing.py --apply   # install (validates, then rolls back on failure)
-python3 scripts/routing.py --remove  # take it out again
+python3 scripts/routing.py --show
+python3 scripts/routing.py --test
+python3 scripts/routing.py --apply
+python3 scripts/routing.py --remove
 ```
 
-## BitTorrent
+`--show` inspects the template. `--test` asks Xray's routing API for decisions;
+it does not perform a real connection to every destination. `--apply` validates
+category tokens, saves `xray-template.backup.json`, changes the template and
+checks runtime startup. If startup fails, it attempts to restore the template
+and restart the container. A failed recovery still requires operator attention.
 
-Refused on every lane.
+These rules are local Xray policy. Do not assume applying them to the master
+updates every remote node. MTProto runs under `mtg` and is outside Xray routing.
+AmneziaWG routing depends on the panel's embedded forwarding integration; test
+an actual client path before relying on policy enforcement for that transport.
 
-3x-ui's default template already ships `{protocol: [bittorrent], outboundTag:
-blocked}`, but a rule like that can only fire if **sniffing is on** — Xray
-classifies the protocol by reading the first payload. Every inbound here was
-created with sniffing disabled, so for a while the config read as though
-torrents were blocked while they ran untouched. `provision-inbounds.py` now
-enables sniffing with `routeOnly`, which supplies the routing decision without
-letting a sniffed name replace the address the client asked for.
+## Server rules
 
-## Russian destinations
+| Policy | Behavior |
+|---|---|
+| BitTorrent | A protocol-matching rule sends detected traffic to `blocked` |
+| Stack's own zone | `domain:BASE_DOMAIN` is exempted from Russian-destination refusal |
+| Listed sites/IPs blocked in Russia | Exempted first and sent to Xray's `direct` outbound |
+| Remaining configured Russian domain/IP categories | Sent to `blocked` |
 
-**Refused**, so the tunnel provably never carries them and this server never
-appears in a connection to a Russian host. Each device is expected to reach
-them directly instead.
+Here, `direct` means the VPS connects to the destination. It does not mean the
+user's device bypasses the tunnel. `blocked` means refusal, not a redirect to
+the device's own network. Category lists are classification data, not proof of
+an exhaustive geographic boundary.
 
-Rule order matters, and the first rule exists to protect the second from
-itself:
+Protocol matching requires inbound sniffing. Provisioning enables it with
+`routeOnly`, so classification can guide routing without replacing the
+requested destination address. An installed rule alone does not demonstrate
+that real BitTorrent traffic is detected.
 
-| Rule | Matches | Goes to |
-|---|---|---|
-| `ru-blocked-proxy` | `ru-blocked`, `refilter` domains | `direct` — through the tunnel |
-| `ru-blocked-proxy-ip` | `ru-blocked`, `ru-blocked-community` IPs | `direct` — through the tunnel |
-| `ru-refuse` | `tld-ru`, the `category-*-ru` sets, `ru-available-only-inside` | `blocked` |
-| `ru-refuse-ip` | `geoip:ru` | `blocked` |
+The policy uses `IPIfNonMatch` by default: unmatched names are resolved for IP
+classification. `--apply --domain-strategy AsIs` changes that behavior. Review
+the effect on destinations outside the domain categories before applying it.
 
-Sites *blocked in* Russia are exempted first, so a later "this looks Russian"
-rule can never swallow the traffic the tunnel exists to carry.
+## Category data
 
-`tld-ru` does most of the work: `.ru`, `.su`, `.moscow`, `.tatar` and the
-Cyrillic TLDs. The curated per-sector lists are worth having but are not
-sufficient on their own — `geosite:category-ru` is 1104 domains and contains
-neither `sberbank.ru` nor `gosuslugi.ru`.
+The script uses standard `geoip` categories and the panel's bundled
+`geosite_RU.dat`/`geoip_RU.dat`, produced by
+[runetfreedom/russia-v2ray-rules-dat](https://github.com/runetfreedom/russia-v2ray-rules-dat).
+The actual bundled content depends on the deployed image/data files.
+`--apply` validates requested tokens against the deployed files. Avoid copying
+historical list sizes or memory measurements into a sizing guarantee.
 
-`domainStrategy` is set to `IPIfNonMatch`, so a domain that matches no rule by
-name is resolved and re-checked against `geoip:ru`. That catches a Russian
-service on a non-Russian domain, at the cost of a DNS lookup for each new
-name. `--apply --domain-strategy AsIs` turns that off.
+## Client bypass rules
 
-### The data
+If the server refuses a destination, the client must send it directly from the
+device for that site to work. This is separate from server routing.
 
-`geosite_RU.dat` and `geoip_RU.dat` ship inside the panel image; they are the
-[runetfreedom/russia-v2ray-rules-dat](https://github.com/runetfreedom/russia-v2ray-rules-dat)
-build, which upstream refreshes every six hours. The bundled copies are only as
-fresh as the panel image, so replace them in `/app/bin/` if you want current
-lists.
-
-Do **not** reach for `ru-blocked-all` or `antifilter-download`: 1.37 million
-domains each. `ru-blocked` and `refilter` are ~75 000 and already cost this
-panel about 100 MB of resident memory.
-
-## The client side
-
-The server refusing Russian destinations is only half of it — each device has
-to send them somewhere. Without a bypass rule, a Russian site simply fails to
-load while the VPN is on.
-
-**Happ needs nothing done in the app.** It reads a routing profile straight
-off the subscription response — 3x-ui sets `Routing-Enable: true` and
-`Routing: happ://routing/onadd/<base64 json>` headers, and Happ applies the
-profile when the subscription is added or refreshed. Install it once:
+For HAPP, preview and apply the subscription routing profile:
 
 ```bash
-python3 scripts/routing.py --happ           # preview the profile
-python3 scripts/routing.py --happ --apply   # install and verify the headers
+python3 scripts/routing.py --happ
+python3 scripts/routing.py --happ --apply
 ```
 
-Everyone then gets it by re-adding their subscription. The profile sends
-`geosite:tld-ru`, `geosite:category-ru`, `geoip:ru` and the server's own zone
-to `direct`, and everything else through the tunnel. Field names and
-types are Happ's own, not Xray's — booleans are the strings `"true"`/`"false"`
-([spec](https://www.happ.su/main/dev-docs/routing)).
+The profile configures Russian/private categories and the deployment zone for
+direct access, with other traffic through the proxy. Applying subscription
+headers restarts the panel so it rereads settings. Refresh or re-add the
+subscription, then verify the profile was imported in the actual client.
+The script's [HAPP routing format](https://www.happ.su/main/dev-docs/routing)
+is client-specific; do not copy its field names into an Xray config.
 
-The settings are read once when the subscription server starts, so `--apply`
-restarts the panel; without that the headers keep coming back missing.
+For clients that accept Xray-style category rules, place matching direct rules
+above the proxy catch-all, using their supported UI/config format:
 
-**v2rayN, Hiddify and anything else on Xray core** take the same three tokens
-by hand, routed to `direct`, above any catch-all proxy rule:
-
-```
+```text
 geosite:tld-ru
 geosite:category-ru
 geoip:ru
 ```
 
-They come from the standard `geosite.dat`/`geoip.dat` those clients already
-bundle, so nothing extra needs installing.
+Also bypass the stack's own DNS zone so subscription refresh and entrypoint
+connections do not recurse through the tunnel. Category availability depends
+on the client's data files; verify it rather than assuming another core uses
+the same names.
 
-**AmneziaWG** is the exception. Its config carries `AllowedIPs = 0.0.0.0/0,
-::/0`, and excluding Russia would mean expanding that into several thousand
-CIDR entries. Use the Amnezia client's own split-tunnelling, or simply accept
-that Russian sites do not load while that tunnel is up — it is the reserve
-lane, not the everyday one.
+AmneziaWG exports use full-tunnel `AllowedIPs`; client-side split tunnelling
+must be configured separately. Telegram's MTProto proxy is also separate.
 
-**Telegram** is unaffected. MTProto runs under `mtg`, not Xray, so no routing
-rule applies to it.
+## Verify after a change
 
-## Do not block your own zone
-
-If `BASE_DOMAIN` sits inside a category you block — any `.ru` zone is matched
-by `geosite:tld-ru` — then the RU rules block the hostnames the deployment is
-*reached by*: the subscription URL, the panel, and the MTProto proxy's FakeTLS
-fronting name. A client already inside the tunnel then cannot reach the tunnel's own
-endpoints — subscription refreshes fail and the Telegram proxy hangs on
-connect, forever, with no error.
-
-`routing.py` puts a `domain:BASE_DOMAIN` exemption ahead of every RU rule, and
-`--test` asserts all four hostnames still resolve to `direct`. The Happ profile
-sends that zone direct as well, so a client never reaches the entry point
-through the tunnel at all.
-
-## What to tell people
-
-> If a Russian site will not open, the VPN is doing that on purpose. Turn it
-> off for that site, or add the bypass rules once and forget about it.
-
-## Verifying
-
-`--test` asks Xray itself where it would send a destination, rather than
-reading the rules back:
-
-```
-sberbank.ru      want=blocked  got=blocked    ok
-meduza.io        want=direct   got=direct     ok
-google.com       want=direct   got=direct*    ok
-bittorrent       want=blocked  got=blocked    ok
-```
-
-A `*` means no rule matched, so the first outbound — `direct` — applies. That
-is the normal path for most of the internet.
-
-## Safety
-
-`routing.py` writes the whole Xray template, and it is one process for every
-lane: an unknown category name does not disable its own rule, it stops Xray and
-takes all five lanes down. So `--apply` validates every token against the
-bundled files first, backs the template up to `xray-template.backup.json`,
-and — if Xray does not come back within ~30 seconds — restores the backup and
-restarts the container by itself.
+Run `--test` and inspect the requested versus actual routing decisions. Check
+the deployment's public/admin hostnames, an intended refused destination and
+an intended allowed destination. Then test actual transfers through the
+relevant client profiles, including client-direct access. If the core does
+not start, preserve logs and check the attempted template rollback before
+making further changes.
