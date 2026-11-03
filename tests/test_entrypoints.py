@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -54,6 +55,30 @@ def test_engine_marks_its_internal_stage_runner(store, config, monkeypatch):
     monkeypatch.setattr(subprocess, "Popen", popen)
     Engine(store).run_process(Step("verify", "verify"), store.load(), lambda _: None)
     assert seen == ["1"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX executable permissions")
+def test_stack_stage_accepts_bootstrap_without_executable_bit(store, config):
+    config["env"]["ACME_MODE"] = "http"
+    store.save(config)
+    store.render(store.load())
+    for name in ("install.sh", "scripts/env.sh", "scripts/config-env.py"):
+        target = store.root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT / name, target)
+    bootstrap = store.root / "bootstrap.sh"
+    bootstrap.write_text('printf "bootstrap-invoked\\n"\n')
+    bootstrap.chmod(0o644)
+    binary = store.root / "bin"
+    binary.mkdir()
+    executable(binary, "id", "echo 0\n")
+    executable(binary, "docker", "echo 172.28.0.0/16\n")
+    env = {**os.environ, "STACK_MANAGED_APPLY": "1", "PYTHONPATH": str(ROOT)}
+    env["PATH"] = str(binary) + os.pathsep + str(Path(sys.executable).parent) + os.pathsep + env["PATH"]
+    result = subprocess.run([bash(), "install.sh", "--stage", "stack"], cwd=store.root,
+                            env=env, capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "bootstrap-invoked" in result.stdout
 
 
 def test_tuning_preview_leaves_defaults_and_never_applies(tmp_path):

@@ -75,7 +75,11 @@ echo ">> acme mode: ${ACME_MODE:-dns}  (traefik/${TRAEFIK_FILE})"
 
 echo
 echo ">> starting: traefik -> decoy -> xui"
-( cd traefik && docker compose -f "$TRAEFIK_FILE" --env-file ../.env up -d )
+( cd traefik
+  compose_files=(-f "$TRAEFIK_FILE")
+  [ ! -f ../.stack/traefik.compose.yml ] || compose_files+=(-f ../.stack/traefik.compose.yml)
+  docker compose "${compose_files[@]}" --env-file ../.env up -d
+)
 for d in decoy xui; do
   ( cd "$d" && docker compose --env-file ../.env up -d )
 done

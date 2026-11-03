@@ -40,6 +40,13 @@ Reality, Trojan/HTTPUpgrade and Hysteria2 link. `PROBE_ACCOUNT` selects an exist
 account; no account is created. Transfers consume that account's quota. Secrets
 go through stdin rather than command arguments or output.
 
+Local probes reuse a panel session in `.stack/probe-panel-session.cookies`
+instead of logging in on every timer run. The cache is private (mode 600 on
+Linux) and contains an authentication credential; do not share it. Expired
+sessions are reauthenticated, so enabled panel login notifications can still
+appear on the first check or after session expiry. Ordinary administrative
+logins keep their existing behavior and notifications.
+
 The default target is Telegram's widget script. Compare another target before
 attributing a failure to the tunnel:
 

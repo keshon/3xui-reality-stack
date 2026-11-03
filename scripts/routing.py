@@ -67,6 +67,13 @@ RU_SITE = [
 RU_IP = ["geoip:ru"]
 
 
+def refuse_ru(env):
+    policy = env.get("RU_POLICY", "refuse")
+    if policy not in ("allow", "refuse"):
+        raise ValueError("RU_POLICY must be allow or refuse")
+    return policy == "refuse"
+
+
 def get_template(p):
     """Read the Xray config template.
 
@@ -147,7 +154,8 @@ def test(p, inbound_tag, env=None):
             return tag or "direct*"
         return str(obj)[:60] if obj is not None else "?" + str(r.get("msg", ""))[:40]
 
-    checks = list(CHECKS)
+    checks = [(host, kind, "direct" if want == "blocked" and not refuse_ru(env or {}) else want)
+              for host, kind, want in CHECKS]
     # The deployment's own hostnames must never be refused. On a .ru zone the
     # RU rules catch them, and a client inside the tunnel then loses the
     # subscription URL, the panel and the Telegram proxy at once.
@@ -195,13 +203,14 @@ def happ_profile(env):
     # The server's own zone goes direct as well - a client must never reach the
     # tunnel's entry point through the tunnel. On a .ru zone the RU rules would
     # otherwise catch it, and it saves a pointless hairpin in every case.
-    direct_sites = (["domain:" + base] if base else []) + HAPP_DIRECT_SITES
+    refused = refuse_ru(env)
+    direct_sites = (["domain:" + base] if base else []) + (HAPP_DIRECT_SITES if refused else [])
     return {
-        "Name": "%s - RU direct" % (base or "vpn"),
+        "Name": "%s - %s" % (base or "vpn", "RU direct" if refused else "proxy"),
         "GlobalProxy": "true",
         "DomainStrategy": "IPIfNonMatch",
         "DirectSites": direct_sites,
-        "DirectIp": HAPP_DIRECT_IP,
+        "DirectIp": HAPP_DIRECT_IP if refused else ["geoip:private"],
         # Deliberately no Geositeurl/Geoipurl override. Pointing Happ at the
         # runetfreedom build would make the category list match the server's
         # exactly, but that file is ~73 MB - a lot to pull onto every phone
@@ -277,6 +286,7 @@ def main():
         strategy = sys.argv[sys.argv.index("--domain-strategy") + 1]
 
     e = env_file()
+    refused = refuse_ru(e)
     p = Panel(e).login()
     tpl = get_template(p)
     routing = tpl.setdefault("routing", {})
@@ -310,16 +320,16 @@ def main():
     if "--remove" in sys.argv:
         print("removed this script's routing rules")
     else:
-        ps, bad_ps = validate(p, PROXY_SITE, "site")
-        pi, bad_pi = validate(p, PROXY_IP, "ip")
-        rs, bad_rs = validate(p, RU_SITE, "site")
-        ri, bad_ri = validate(p, RU_IP, "ip")
+        ps, bad_ps = validate(p, PROXY_SITE, "site") if refused else ([], [])
+        pi, bad_pi = validate(p, PROXY_IP, "ip") if refused else ([], [])
+        rs, bad_rs = validate(p, RU_SITE, "site") if refused else ([], [])
+        ri, bad_ri = validate(p, RU_IP, "ip") if refused else ([], [])
         for label, bad in (("proxy-site", bad_ps), ("proxy-ip", bad_pi),
                            ("ru-site", bad_rs), ("ru-ip", bad_ri)):
             if bad:
                 print("  ! dropped unknown %s categories: %s"
                       % (label, ", ".join(bad)))
-        if not rs and not ri:
+        if refused and not rs and not ri:
             sys.exit("no usable Russian categories - refusing to write a "
                      "policy that would enforce nothing")
 

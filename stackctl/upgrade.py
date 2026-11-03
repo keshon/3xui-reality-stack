@@ -123,8 +123,12 @@ class Docker:
 
     def compose(self, project, source=None):
         filename = "docker-compose.dns01.yml" if project == "traefik" and self.values.get("ACME_MODE", "dns") == "dns" else "docker-compose.yml"
-        return ["docker", "compose", "--project-directory", str(self.root / project),
-                "-f", str((source or self.root) / project / filename), "--env-file", str(self.root / ".env")]
+        command = ["docker", "compose", "--project-directory", str(self.root / project),
+                   "-f", str((source or self.root) / project / filename)]
+        override = self.root / ".stack/traefik.compose.yml"
+        if project == "traefik" and override.is_file():
+            command += ["-f", str(override)]
+        return command + ["--env-file", str(self.root / ".env")]
 
     def check(self, release, changed):
         actual_panel = run(["docker", "inspect", "-f", "{{.Config.Image}}", "3x-ui"], self.root).strip()

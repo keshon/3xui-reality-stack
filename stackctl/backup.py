@@ -14,7 +14,7 @@ import uuid
 from .envio import read_env
 
 CONFIG_FILES = (".env", "users.txt", "nodes.txt", ".stack/config.json", ".stack/applied.json",
-                ".stack/operation.json", ".stack/adoption.json")
+                ".stack/operation.json", ".stack/adoption.json", ".stack/traefik.compose.yml")
 STATE_FILES = (*CONFIG_FILES, ".stack/panel-ready", "CLIENT-CREDENTIALS.txt", "RELEASE-MANIFEST.json")
 STATE_DIRECTORIES = ("shared/certs", "traefik/data/acme", "xui/db")
 DB_FILES = {"x-ui.db", "x-ui.db-wal", "x-ui.db-shm", "x-ui.db-journal"}

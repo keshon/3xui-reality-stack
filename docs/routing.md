@@ -24,6 +24,13 @@ an actual client path before relying on policy enforcement for that transport.
 
 ## Server rules
 
+`RU_POLICY=refuse` is the default for this script. Set `RU_POLICY=allow` in the
+deployment configuration and run `python3 scripts/routing.py --apply` to remove
+its Russian-destination refusal rules. Other rules, including BitTorrent and
+private-network restrictions, remain in place. The generated HAPP profile also
+omits Russian bypass categories in this mode; already imported client routing
+profiles need to be updated separately.
+
 | Policy | Behavior |
 |---|---|
 | BitTorrent | A protocol-matching rule sends detected traffic to `blocked` |

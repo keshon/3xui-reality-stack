@@ -66,7 +66,7 @@ def outbound(link):
 
 def subscription_links(account=None):
     e = env_file()
-    p = Panel(e).login()
+    p = Panel(e).login(reuse_session=True)
     now_ms = time.time() * 1000
     rows = [c for c in p.clients() if c.get("subId") and c.get("enable", True)
             and (not c.get("expiryTime") or c["expiryTime"] > now_ms)]

@@ -88,3 +88,10 @@ other. Two conditions:
 Anything that wants its own TCP or UDP port on the host. Ports `443/tcp`,
 `443/udp`, `80/tcp`, `MTPROTO_PORT` and `AWG_PORT` belong to this stack; publish
 an app on any other free port directly from its own compose file, as usual.
+
+For shared deployments that need extra Traefik listeners or dashboard routing,
+put deployment-specific Compose settings in `.stack/traefik.compose.yml`.
+Bootstrap and source upgrades include this file after the selected Traefik
+Compose file; state backups preserve it. Keep app containers in their own
+Compose projects. A `command` override replaces the whole Traefik command
+list, so review it when upgrading Traefik settings.

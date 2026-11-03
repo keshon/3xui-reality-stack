@@ -88,3 +88,14 @@ def test_old_python_gets_actionable_error(launcher, monkeypatch, capsys):
     monkeypatch.setattr(launcher.sys, "version_info", (3, 10, 0))
     assert launcher.main([]) == 1
     assert "Python 3.11+" in capsys.readouterr().err
+
+
+def test_ensurepip_system_exit_becomes_actionable_setup_error(launcher, store, monkeypatch):
+    import venv
+    def missing_pip(*args):
+        raise SystemExit(1)
+    monkeypatch.setattr(venv.EnvBuilder, "create", missing_pip)
+    # Exercise the path where the launcher cannot install system packages.
+    monkeypatch.setattr(launcher.sys, "platform", "win32")
+    with pytest.raises(RuntimeError, match="install python.*-venv"):
+        launcher.create_environment(store.root)

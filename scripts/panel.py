@@ -20,8 +20,10 @@ Everything the other scripts learned the hard way lives here:
     list, so a client object cannot be round-tripped verbatim.
 """
 import http.cookiejar
+import hashlib
 import json
 import os
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -33,7 +35,7 @@ import uuid as uuidlib
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 ENV_PATH = os.path.join(ROOT, ".env")
 sys.path.insert(0, ROOT)
-from stackctl.envio import read_env
+from stackctl.envio import atomic_write, read_env
 from stackctl.health import core_running
 
 
@@ -196,8 +198,12 @@ class Panel:
         if not ip:
             raise SystemExit("3x-ui container is not running")
         self.base = f"http://{ip}:2053{env['PANEL_PATH'].rstrip('/')}"
+        self._use_cookies(http.cookiejar.CookieJar())
+
+    def _use_cookies(self, cookies):
+        self.cookies = cookies
         self.op = urllib.request.build_opener(
-            urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+            urllib.request.HTTPCookieProcessor(cookies))
 
     def _csrf(self):
         html = self.op.open(self.base + "/", timeout=20).read().decode("utf-8", "replace")
@@ -239,14 +245,61 @@ class Panel:
             raise RuntimeError("Panel read failed; no changes planned")
         return result
 
-    def login(self, user=None, password=None):
+    def login(self, user=None, password=None, *, reuse_session=False):
         user = user or self.env.get("PANEL_USER") or os.environ.get("PANEL_USER")
         password = password or self.env.get("PANEL_PASS") or os.environ.get("PANEL_PASS")
+        cache = None
+        if reuse_session:
+            cache = Path(ROOT) / ".stack" / "probe-panel-session.cookies"
+            identity = hashlib.sha256(json.dumps([self.base, user, password]).encode()).hexdigest()
+            marker = "# identity: " + identity
+            if self._restore_session(cache, marker):
+                return self
         d = json.loads(self.req("/login", {"username": user,
                                            "password": password}).read())
         if not d.get("success"):
             raise SystemExit(f"panel login failed: {d}")
+        if cache is not None:
+            if cache.parent.is_symlink() or cache.is_symlink():
+                raise ValueError("Probe session cache must not traverse symlinks")
+            cache.parent.mkdir(mode=0o700, exist_ok=True)
+            cache.parent.chmod(0o700)
+            jar = http.cookiejar.LWPCookieJar()
+            for cookie in self.cookies:
+                jar.set_cookie(cookie)
+            atomic_write(cache, "#LWP-Cookies-2.0\n" + marker + "\n"
+                         + jar.as_lwp_str(ignore_discard=True))
         return self
+
+    def _restore_session(self, cache, marker):
+        """Only probes opt in; validate cached auth with a read before reuse."""
+        try:
+            if cache.parent.is_symlink() or cache.is_symlink():
+                raise ValueError("Probe session cache must not traverse symlinks")
+            info = cache.stat()
+            if info.st_size > 65536 or (os.name != "nt" and info.st_mode & 0o077):
+                return False
+            if marker not in cache.read_text(encoding="utf-8").splitlines()[:2]:
+                return False
+            jar = http.cookiejar.LWPCookieJar(str(cache))
+            jar.load(ignore_discard=True)
+        except (FileNotFoundError, http.cookiejar.LoadError, UnicodeError):
+            return False
+        if not list(jar):
+            return False
+        self._use_cookies(jar)
+        try:
+            result = json.loads(self.req("/panel/api/clients/list").read())
+            if isinstance(result, dict) and result.get("success") is True:
+                return True
+        except urllib.error.HTTPError as ex:
+            if ex.code not in (401, 403):
+                raise
+        except (ValueError, SystemExit):
+            # An expired session can redirect to the login HTML/no CSRF token.
+            pass
+        self._use_cookies(http.cookiejar.CookieJar())
+        return False
 
     # ── convenience ─────────────────────────────────────────────────────────
     def inbounds(self):

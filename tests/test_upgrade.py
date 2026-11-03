@@ -12,6 +12,20 @@ from stackctl.upgrade import Docker, Release, Upgrade, UpgradeError, digest
 from stackctl.engine import Engine
 
 
+def test_traefik_deployment_override_is_used_for_live_and_release_preview(tmp_path):
+    (tmp_path / ".env").write_text("ACME_MODE=http\n")
+    (tmp_path / ".stack").mkdir()
+    override = tmp_path / ".stack/traefik.compose.yml"
+    override.write_text("services: {}\n")
+    docker = Docker(tmp_path)
+    release = tmp_path / "release"
+    for source in (None, release):
+        command = docker.compose("traefik", source)
+        assert str(override) in command
+        assert command.index(str(override)) > command.index(str((source or tmp_path) / "traefik/docker-compose.yml"))
+    assert str(override) not in docker.compose("xui", release)
+
+
 def inventory(root):
     files = {str(p.relative_to(root)).replace("\\", "/"): hashlib.sha256(p.read_bytes()).hexdigest()
              for p in root.rglob("*") if p.is_file() and p.name != "RELEASE-MANIFEST.json"}

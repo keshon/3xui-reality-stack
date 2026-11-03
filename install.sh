@@ -165,7 +165,7 @@ if [ -n "$EXISTING" ] && [ "$EXISTING" != "$PROXY_SUBNET" ]; then
   set_env PROXY_SUBNET "$EXISTING"
   ok "adopted the existing 'proxy' subnet: $EXISTING"
 fi
-./bootstrap.sh
+bash "$ROOT/bootstrap.sh"
 
 fi
 
@@ -195,7 +195,7 @@ Panel(env_file()).login()
 PY
 python3 "$ROOT/scripts/config-env.py" --mark-panel-ready
 if [ "$ROLE" = node ]; then
-  ./bootstrap.sh
+  bash "$ROOT/bootstrap.sh"
 fi
 ok "panel at https://${PANEL_DOMAIN}${PANEL_PATH}/"
 

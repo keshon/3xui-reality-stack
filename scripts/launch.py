@@ -40,9 +40,10 @@ def create_environment(root):
     try:
         import venv
         venv.EnvBuilder(with_pip=True).create(root / ".venv")
-    except (ImportError, OSError, subprocess.CalledProcessError):
+    except (ImportError, OSError, subprocess.CalledProcessError, SystemExit):
         # Debian/Ubuntu split ensurepip out of the Python package. Install the
         # matching support package only for their system interpreter as root.
+        # Their patched venv can call sys.exit() instead of raising an error.
         package = "python%d.%d-venv" % sys.version_info[:2]
         can_install = (sys.platform == "linux" and os.geteuid() == 0
                        and Path("/etc/debian_version").exists()
