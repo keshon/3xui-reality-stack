@@ -20,6 +20,39 @@ environment. Tests use temporary deployment roots and fake actions rather than
 configuring the developer's host or contacting a real panel. Read skip output
 when a platform cannot exercise an adapter or filesystem feature.
 
+## Go controller development
+
+The experimental Go replacement is separate from the operational Python CLI.
+Its scope, layout and acceptance milestones are in the
+[Go controller plan](internal/go-controller-plan.md). With the Go version in
+[go.mod](../go.mod), run `go test ./...` and `go vet ./...` from the repository
+root. Format changed Go files with `gofmt`. Build local binaries under `bin/`.
+Continue running the Python suite while both implementations coexist.
+
+**Practice:** follow GEKTOR's root module, `cmd/` entrypoints, responsibility-based
+`internal/` packages and colocated tests. Keep terminal dependencies outside
+deployment logic; prefer the standard library and cgo-free dependencies.
+
+**Enforced — `internal/deployment/lock_test.go`, `tests/test_go_coexistence.py`:**
+Go and Python use the same deployment lock. Python refuses unfinished or unknown
+Go operation markers between invocations. Interoperability tests need a Python
+interpreter; see the plan for `STACK_TEST_PYTHON`. The Go mutation workflow is
+currently available to internal tests only, pending container validation.
+
+**Enforced — `cmd/stack-manager/application_test.go`:** the manager's production
+dependency graph excludes `internal/xui` and `internal/testkit`. Its read commands
+use the same controller API and rendering as the local CLI. The protocol and
+simulated-stack tests cover framing, rejected mutation/path requests, mismatched
+responses, cancellation and process-exit recovery. They do not replace SSH host
+integration or real-container tests.
+
+**Enforced — `internal/testkit/review_test.go`, `internal/control/operations_test.go`,
+`internal/xui/review_test.go`:** reviews bind private input/runtime observations to
+random, expiring IDs. Execution requires exact confirmation; duplicate delivery
+does not repeat an action. Recovery targets an exact operation ID. The simulated
+adapter exercises execution across reconnects; 3x-ui exposes review/status but
+deliberately does not implement the execution adapter yet.
+
 ## Rule labels
 
 - **Enforced:** names a guard or existing check. A check only covers the cases

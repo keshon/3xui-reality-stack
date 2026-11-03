@@ -1,0 +1,78 @@
+name: Go controller
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'compatibility.json'
+      - 'assets.go'
+      - 'decoy/**'
+      - 'stackctl/config.py'
+      - 'scripts/install-controller.sh'
+      - '.github/workflows/go-controller.yml'
+  push:
+    branches: [main, codex/go-deployment-engine]
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
+      - 'compatibility.json'
+      - 'assets.go'
+      - 'decoy/**'
+      - 'stackctl/config.py'
+      - 'scripts/install-controller.sh'
+      - '.github/workflows/go-controller.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: go-controller-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Unit and interoperability tests
+        env:
+          STACK_TEST_PYTHON: /usr/bin/python3
+        run: go test -race ./... -timeout 120s
+      - name: Vet including integration tests
+        run: go vet -tags integration ./...
+      - name: Verify systemd syntax and read-only ownership probe
+        env:
+          STACK_TEST_SYSTEMD: '1'
+        run: go test -tags integration ./internal/host -run '^TestService(SystemdSyntax|OwnershipProbe)$' -count=1 -v -timeout 30s
+      - name: Build and verify release candidates
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          go run ./cmd/stack-release --version v0.0.0-ci --out "$RUNNER_TEMP/controller-release"
+          cd "$RUNNER_TEMP/controller-release"
+          sha256sum --check SHA256SUMS
+          test "$(./stackctl-go_linux_amd64 version)" = v0.0.0-ci
+          test "$(./stack-manager_linux_amd64 version)" = v0.0.0-ci
+      - name: Prepare disposable container tests
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y sqlite3
+          docker --host unix:///var/run/docker.sock pull ghcr.io/mhsanaei/3x-ui:v3.7.0
+          docker --host unix:///var/run/docker.sock pull traefik:v3.7.12
+      - name: Pinned panel workflow and recovery
+        env:
+          STACK_TEST_CONTAINERS: '1'
+        run: go test -tags integration ./internal/xui -run '^Test(PinnedPanelBackupRestore|PinnedPanelIsolation|RenderedComposeConfig)$' -count=1 -v -timeout 5m

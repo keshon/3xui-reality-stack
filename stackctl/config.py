@@ -194,7 +194,9 @@ class Store:
     @contextmanager
     def lock(self):
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        with open(self.directory / "lock", "a+b") as stream:
+        # Unbuffered writes must fail inside the lock error handler, rather
+        # than being retried by close() after another process denied access.
+        with open(self.directory / "lock", "a+b", buffering=0) as stream:
             try:
                 if os.name == "nt":
                     import msvcrt
@@ -206,6 +208,18 @@ class Store:
             except OSError:
                 raise ValueError("Another stack process is saving or applying. Wait for it to finish.") from None
             try:
+                # Go and Python share the OS lock. Between Go invocations its
+                # journal also prevents Python from taking over partial state.
+                if (self.directory / "go-initialization.json").exists() and not self.applied_path.exists():
+                    raise ValueError("A Go initialization draft is not deployed. Continue with the Go controller.")
+                go_marker = self.directory / "go-operation.json"
+                if go_marker.exists():
+                    try:
+                        go_state = self.json(go_marker)
+                    except (OSError, ValueError):
+                        raise ValueError("Cannot read Go operation state; preserve it for recovery.") from None
+                    if not isinstance(go_state, dict) or go_state.get("version") != 1 or go_state.get("status") not in ("complete", "cancelled"):
+                        raise ValueError("A Go controller operation needs recovery. Resume with its original adapter.")
                 yield stream.fileno()
             finally:
                 if os.name == "nt":
