@@ -1,3 +1,3 @@
-# Multi-node investigation
+# Multi-node
 
-This guide has moved to [Historical investigation](internal/multinode-recon.md).
+See [Multi-node](multinode.md).

@@ -13,6 +13,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 	"github.com/keshon/3xui-reality-stack/internal/control"
 	"github.com/keshon/3xui-reality-stack/internal/deployment"
@@ -36,6 +37,9 @@ const (
 	review
 	confirmation
 	help
+	installationForm
+	installationChecks
+	access
 )
 
 type snapshot struct {
@@ -54,22 +58,26 @@ type actionResult struct {
 }
 
 type model struct {
-	ctx                            context.Context
-	backend                        Backend
-	title                          string
-	screen                         screen
-	selected, focus, width, height int
-	fields                         [2]textinput.Model
-	viewport                       viewport.Model
-	state                          snapshot
-	review                         *deployment.Review
-	confirmAction, confirmID       string
-	busy, mutating                 bool
-	message                        string
-	menuOpen                       bool
-	menu, menuItem                 int
-	modalBase, helpBase            screen
-	navFocused, confirmBack        bool
+	ctx                             context.Context
+	backend                         Backend
+	title                           string
+	screen                          screen
+	selected, focus, width, height  int
+	fields                          [2]textinput.Model
+	viewport                        viewport.Model
+	wizard                          installationWizard
+	installPreflight                deployment.PreflightReport
+	accessInfo                      *deployment.AccessReport
+	showSecrets, accessAfterRefresh bool
+	state                           snapshot
+	review                          *deployment.Review
+	confirmAction, confirmID        string
+	busy, mutating                  bool
+	message                         string
+	menuOpen                        bool
+	menu, menuItem                  int
+	modalBase, helpBase             screen
+	navFocused, confirmBack         bool
 }
 
 func newModel(ctx context.Context, backend Backend, title string) *model {
@@ -101,10 +109,17 @@ func (m *model) resize(width, height int) {
 		paneWidth -= 23
 	}
 	m.viewport.SetWidth(max(1, paneWidth-4))
-	m.viewport.SetHeight(max(1, height-8))
+	m.viewport.SetHeight(max(1, height-7))
+	for i := range m.wizard.fields {
+		m.wizard.fields[i].SetWidth(max(1, min(width-16, 48)))
+	}
 	for i := range m.fields {
 		m.fields[i].SetWidth(max(1, min(width-12, 52)))
 	}
+}
+
+func (m *model) setContent(content string) {
+	m.viewport.SetContent(ansi.Wrap(content, m.viewport.Width(), ""))
 }
 
 func (m *model) clearPassword() {
@@ -116,6 +131,9 @@ func (m *model) clearPassword() {
 }
 
 func (m *model) navigate(next screen) {
+	if next != access {
+		m.accessInfo, m.showSecrets = nil, false
+	}
 	wasModal := m.screen == password || m.screen == confirmation
 	openingModal := next == password || next == confirmation
 	if m.screen == password {
@@ -130,8 +148,10 @@ func (m *model) navigate(next screen) {
 		m.message = ""
 	}
 	m.navFocused = next == home
-	if next >= status && next <= password {
-		m.selected = int(next) - 1
+	for index, page := range m.navigationScreens() {
+		if page == next {
+			m.selected = index
+		}
 	}
 	m.menuOpen = false
 	if !openingModal && !(wasModal && next == m.modalBase) {
@@ -151,10 +171,17 @@ func (m *model) refresh() tea.Cmd {
 		ctx, cancel := context.WithTimeout(m.ctx, 45*time.Second)
 		defer cancel()
 		var s snapshot
+		s.operation, s.err = m.backend.Operation(ctx)
+		if s.err != nil {
+			return s
+		}
 		if s.report, s.err = m.backend.Inspect(ctx); s.err != nil {
 			return s
 		}
 		if s.plan, s.err = m.backend.Plan(ctx); s.err != nil {
+			return s
+		}
+		if m.installer() != nil && !s.report.Baseline {
 			return s
 		}
 		if s.runtime, s.err = m.backend.Runtime(ctx); s.err != nil {
@@ -169,8 +196,12 @@ func (m *model) perform(action, id, secret string) tea.Cmd {
 	m.busy = true
 	m.mutating = action == "apply" || action == "resume" || action == "cancel" || action == "configure"
 	m.message = "Working…"
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(m.ctx, 2*time.Minute)
+	work := func() tea.Msg {
+		budget := 2 * time.Minute
+		if m.installer() != nil && (action == "apply" || action == "resume") {
+			budget = 20 * time.Minute
+		}
+		ctx, cancel := context.WithTimeout(m.ctx, budget)
 		defer cancel()
 		r := actionResult{action: action}
 		switch action {
@@ -187,6 +218,10 @@ func (m *model) perform(action, id, secret string) tea.Cmd {
 		}
 		return r
 	}
+	if m.installer() != nil && (action == "apply" || action == "resume") {
+		return tea.Batch(work, m.pollOperation())
+	}
+	return work
 }
 
 func Run(ctx context.Context, backend Backend, input io.Reader, output io.Writer, title string) error {
@@ -207,6 +242,7 @@ func Run(ctx context.Context, backend Backend, input io.Reader, output io.Writer
 	options = append(options, inputOptions...)
 	_, err = tea.NewProgram(m, options...).Run()
 	m.clearPassword()
+	m.clearWizard()
 	if m.mutating {
 		return errors.New("TUI closed during a request; inspect operation status before retrying")
 	}

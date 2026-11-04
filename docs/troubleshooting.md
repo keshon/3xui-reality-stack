@@ -104,9 +104,9 @@ the same client/path. Refresh the subscription to receive a changed published
 `REALITY_FINGERPRINT`; it is a client setting, not server authentication policy.
 
 Packet captures contain peer addresses and traffic metadata. Keep them private
-and bound the capture duration/size. Earlier measurements are preserved in
-[implementation notes](internal/implementation-notes.md), including an observed
-version mismatch; that observation is not a universal Xray version rule.
+and bound the capture duration/size. Check the actual client/server core
+versions and test the same client path before attributing a failure to a
+version mismatch.
 
 ## Stalls and resource pressure
 

@@ -13,8 +13,12 @@ import (
 )
 
 func main() {
-	scenario := flag.String("scenario", "healthy", "healthy, blocked, or interrupted")
+	scenario := flag.String("scenario", "healthy", "healthy, blocked, interrupted, install, install-blocked, install-interrupted, or installed")
+	renderDocs := flag.String("render-docs", "", "render installation examples as SVG files in this directory")
 	flag.Parse()
+	if *renderDocs != "" {
+		*scenario = "install"
+	}
 	b, err := newPreview(*scenario)
 	if flag.NArg() != 0 {
 		err = fmt.Errorf("unexpected arguments")
@@ -22,7 +26,12 @@ func main() {
 	if err == nil {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
-		err = tui.Run(ctx, b, os.Stdin, os.Stdout, "MOCK DATA · "+*scenario+" · nothing is saved or deployed")
+		if *renderDocs != "" {
+			b.initialized, b.pending = true, true
+			err = tui.WriteInstallationExamples(ctx, b, *renderDocs)
+		} else {
+			err = tui.Run(ctx, b, os.Stdin, os.Stdout, "MOCK DATA · "+*scenario+" · nothing is saved or deployed")
+		}
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)

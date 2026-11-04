@@ -17,6 +17,9 @@ type Operator interface {
 
 func (c Controller) Methods() []string {
 	methods := []string{"inspect", "plan", "runtime", "operation"}
+	if _, ok := c.Stack.(accessAdapter); ok {
+		methods = append(methods, "access")
+	}
 	if _, ok := c.Stack.(initializationAdapter); ok {
 		methods = append(methods, "initialize")
 	}

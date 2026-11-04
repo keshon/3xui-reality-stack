@@ -1,6 +1,9 @@
 package main
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -8,6 +11,31 @@ import (
 )
 
 var _ tui.Backend = (*preview)(nil)
+
+func TestInstallationDocumentationMatchesCurrentUI(t *testing.T) {
+	b, _ := newPreview("install")
+	b.initialized, b.pending = true, true
+	directory := t.TempDir()
+	if err := tui.WriteInstallationExamples(t.Context(), b, directory); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"setup", "readiness", "deploy", "progress", "access"} {
+		generated, err := os.ReadFile(filepath.Join(directory, name+".svg"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		committed, err := os.ReadFile(filepath.Join("..", "..", "docs", "assets", "wizard", name+".svg"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(generated, committed) {
+			t.Fatalf("%s example is stale; run go run ./cmd/stack-preview --render-docs docs/assets/wizard", name)
+		}
+	}
+	if b.op.Status != "idle" || b.review != nil || b.deployed {
+		t.Fatal("rendering examples performed an operation")
+	}
+}
 
 func TestPreviewPasswordRoundTripRequiresFreshConfirmation(t *testing.T) {
 	b, _ := newPreview("healthy")

@@ -56,9 +56,10 @@ func TestMouseNavigationMenusFooterAndPasswordRoundTrip(t *testing.T) {
 	if b.applyCalls != 1 || m.state.operation.Status != "complete" {
 		t.Fatal("mouse confirmed operation failed")
 	}
-	clickLabel(t, m, "Help")
+	clickLabel(t, m, "Session")
+	clickLabel(t, m, "Keyboard help")
 	if m.screen != help {
-		t.Fatal("footer click did not open Help")
+		t.Fatal("menu click did not open Help")
 	}
 	clickLabel(t, m, "[ Close ]")
 	if m.screen != operation {

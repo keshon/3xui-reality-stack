@@ -26,9 +26,6 @@ func (s InstallStack) Inspect(ctx context.Context, root string) (deployment.Insp
 		return i, err
 	}
 	if i.Report.Baseline {
-		i.Report.Blockers = append(i.Report.Blockers, "installation workflow requires an unused initialization draft")
-		i.Plan.Status = "blocked"
-		i.Plan.Reasons = i.Report.Blockers
 		return i, nil
 	}
 	if _, err := os.Lstat(filepath.Join(root, ".stack/go-initialization.json")); err != nil {

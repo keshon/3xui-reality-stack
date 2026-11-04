@@ -115,8 +115,5 @@ Reusing a name can leave `<name>-*` inbounds attached to the old panel node ID.
 a registration is not guaranteed to restore the original IDs or attachments;
 there is no automatic rollback for this migration.
 
-The [historical replacement procedure](internal/legacy-node-replacement.md)
-is retained as implementation evidence and must not be used as a current
-managed-deployment runbook. Use [Maintenance](maintenance.md) for supported
-source rollback and consistent state backups. Full master recovery and fleet
-migration remain manual operations.
+Use [Maintenance](maintenance.md) for source rollback and consistent state
+backups. Full master recovery and fleet migration remain manual operations.

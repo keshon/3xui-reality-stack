@@ -41,11 +41,12 @@ func planContent(p deployment.Plan) string {
 func (m *model) content() string {
 	var b strings.Builder
 	switch m.screen {
+	case access:
+		return m.accessContent()
+	case installationChecks:
+		return m.installationContent()
 	case home:
-		labels := []string{"Status", "Plan", "Operation"}
-		if m.supports("configure", "apply") {
-			labels = append(labels, "Change panel password")
-		}
+		labels := m.navigationLabels()
 		for i, label := range labels {
 			if i == m.selected {
 				fmt.Fprintf(&b, "  %s\n", accent.Render("> "+label))
@@ -55,9 +56,9 @@ func (m *model) content() string {
 		}
 		mode := "Read-only session"
 		if m.supports("apply") {
-			mode = "Panel password changes enabled"
+			mode = m.accessMode()
 		}
-		fmt.Fprintf(&b, "\n%s\nExisting installations only.\n", mode)
+		fmt.Fprintf(&b, "\n%s\n", mode)
 		if m.state.runtime.Status != "" {
 			fmt.Fprintf(&b, "\nRuntime: %s\nPlan: %s\n", clean(m.state.runtime.Status), clean(m.state.plan.Status))
 		}
@@ -100,7 +101,7 @@ func (m *model) content() string {
 			b.WriteString("\nThis controller cannot apply the review.\n")
 		}
 	case confirmation:
-		label := map[string]string{"apply": "Apply the reviewed password change?", "resume": "Resume this operation from its saved checkpoint?", "cancel": "Cancel preparation before any deployment effects?"}[m.confirmAction]
+		label := map[string]string{"apply": "Apply the reviewed changes?", "resume": "Resume this operation from its saved checkpoint?", "cancel": "Cancel preparation before any deployment effects?"}[m.confirmAction]
 		fmt.Fprintf(&b, "%s\n\nID: %s\n\nEnter confirms. Escape goes back.", label, clean(m.confirmID))
 	}
 	return b.String()

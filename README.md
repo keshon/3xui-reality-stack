@@ -95,7 +95,7 @@ network and server measurements using [Troubleshooting](docs/troubleshooting.md)
 | Guide | Contents |
 |---|---|
 | [Running](docs/running.md) | Installation, adoption, configuration, console/CLI and interrupted operations |
-| [Go controller prerelease](docs/go-controller.md) | Compiled installer, standalone deployment and local/SSH TUI |
+| [Go controller](docs/go-controller.md) | Compiled controller, guided installation and local/SSH TUI |
 | [Clients](docs/clients.md) | Subscriptions, transport choice, HAPP baseline and AmneziaWG exports |
 | [Maintenance](docs/maintenance.md) | Source upgrades, rollback, consistent state backups and restore boundaries |
 | [Troubleshooting](docs/troubleshooting.md) | Measurements, authenticated probes, observation and recovery |
@@ -107,8 +107,6 @@ network and server measurements using [Troubleshooting](docs/troubleshooting.md)
 
 [.env.example](.env.example) documents deployment inputs;
 [compatibility.json](compatibility.json) records the tested runtime versions.
-Historical investigations are retained under `docs/internal/` and linked from
-the relevant guides.
 
 ## License
 

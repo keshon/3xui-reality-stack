@@ -247,7 +247,6 @@ func TestUnsupportedCommandsCannotExecute(t *testing.T) {
 func TestCLIInstallationOptInIsLocalAndSeparate(t *testing.T) {
 	for _, args := range [][]string{
 		{"serve", "--stdio", "--experimental-install"},
-		{"tui", "--experimental-install"},
 		{"initialize", "--config-stdin", "--experimental-install"},
 		{"review", "--experimental-install", "--experimental-password-writes"},
 	} {
@@ -267,5 +266,37 @@ func TestCLIInstallationOptInIsLocalAndSeparate(t *testing.T) {
 		if err == nil || (err == deployment.ErrExecutionUnavailable) == enabled {
 			t.Fatal("CLI did not select only the explicitly enabled installation adapter", err)
 		}
+	}
+}
+
+func TestTUIInstallationSelectionPreservesLegacyAndCompletedRoots(t *testing.T) {
+	parent := t.TempDir()
+	root := filepath.Join(parent, "new")
+	if !installationTarget(root) {
+		t.Fatal("new absolute target did not select installation")
+	}
+	if installationTarget("relative-new-stack") {
+		t.Fatal("relative missing target enabled installation")
+	}
+	if err := os.Mkdir(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if installationTarget(root) {
+		t.Fatal("existing unmarked directory enabled fresh installation")
+	}
+	if err := os.Mkdir(filepath.Join(root, ".stack"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".stack/go-initialization.json"), []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if !installationTarget(root) {
+		t.Fatal("draft did not select setup continuation")
+	}
+	if err := os.WriteFile(filepath.Join(root, ".stack/applied.json"), []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if installationTarget(root) {
+		t.Fatal("applied root automatically enabled installation")
 	}
 }

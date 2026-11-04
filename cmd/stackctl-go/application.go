@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/keshon/3xui-reality-stack/internal/buildinfo"
 	"github.com/keshon/3xui-reality-stack/internal/console"
@@ -36,7 +37,7 @@ func runWithStack(ctx context.Context, args []string, out io.Writer, stack stack
 }
 
 func runApplication(ctx context.Context, args []string, in io.Reader, out io.Writer, stack stackInspector) error {
-	const usage = "usage: stackctl-go version\n       stackctl-go tui [--root DIRECTORY] [--experimental-password-writes]\n       stackctl-go initialize --config-stdin --root /absolute/new/directory\n       stackctl-go <inspect|plan|runtime|preflight|review|operation> [--root DIRECTORY]\n       stackctl-go configure-password --password-stdin --experimental-password-writes [--root DIRECTORY]\n       stackctl-go apply --confirm REVIEW_ID [--root DIRECTORY]\n       stackctl-go <resume|cancel-preparation> --operation OPERATION_ID [--root DIRECTORY]\n       stackctl-go serve --stdio [--root DIRECTORY]\n3x-ui password configuration and execution require --experimental-password-writes.\nFresh standalone installation requires --experimental-install on plan/review/apply/resume/cancel-preparation; local CLI only."
+	const usage = "usage: stackctl-go version\n       stackctl-go tui [--root DIRECTORY] [--experimental-password-writes]\n       stackctl-go initialize --config-stdin --root /absolute/new/directory\n       stackctl-go <inspect|plan|runtime|preflight|review|operation> [--root DIRECTORY]\n       stackctl-go configure-password --password-stdin --experimental-password-writes [--root DIRECTORY]\n       stackctl-go apply --confirm REVIEW_ID [--root DIRECTORY]\n       stackctl-go <resume|cancel-preparation> --operation OPERATION_ID [--root DIRECTORY]\n       stackctl-go serve --stdio [--root DIRECTORY]\n3x-ui password configuration and execution require --experimental-password-writes.\nFresh installation: local TUI wizard for a new --root, or --experimental-install on plan/review/apply/resume/cancel-preparation. SSH installation is unavailable."
 	if len(args) == 0 {
 		return errors.New(usage)
 	}
@@ -75,7 +76,7 @@ func runApplication(ctx context.Context, args []string, in io.Reader, out io.Wri
 			return errors.New(usage)
 		}
 		switch args[0] {
-		case "plan", "review", "apply", "resume", "cancel-preparation":
+		case "plan", "review", "apply", "resume", "cancel-preparation", "tui":
 		default:
 			return errors.New(usage)
 		}
@@ -102,7 +103,14 @@ func runApplication(ctx context.Context, args []string, in io.Reader, out io.Wri
 		if *stdio || *confirm != "" || *operation != "" {
 			return errors.New(usage)
 		}
-		return tui.Run(ctx, controller, in, out, "Local controller")
+		if adapter, ok := stack.(xui.Stack); ok && installationTarget(*root) {
+			controller.Stack = xui.InstallStack{Stack: adapter}
+		}
+		var backend tui.Backend = controller
+		if _, ok := controller.Stack.(xui.InstallStack); ok {
+			backend = tui.NewInstallationBackend(controller)
+		}
+		return tui.Run(ctx, backend, in, out, "Local controller · "+*root)
 	}
 	if args[0] == "initialize" {
 		if *stdio || *confirm != "" || *operation != "" {
@@ -134,4 +142,20 @@ func runApplication(ctx context.Context, args []string, in io.Reader, out io.Wri
 		return errors.New(usage)
 	}
 	return console.Run(ctx, args[0], console.Options{Confirm: *confirm, OperationID: *operation}, out, controller)
+}
+
+// Select installation UI for a new absolute target or an unfinished Go draft.
+// Legacy directories retain read-only composition; no runtime is adopted here.
+func installationTarget(root string) bool {
+	if _, err := os.Lstat(root); os.IsNotExist(err) {
+		return filepath.IsAbs(root)
+	}
+	if _, err := os.Lstat(filepath.Join(root, ".stack/go-initialization.json")); err != nil {
+		return false
+	}
+	if _, err := os.Lstat(filepath.Join(root, ".stack/applied.json")); os.IsNotExist(err) {
+		return true
+	}
+	op, err := (deployment.Engine{Root: root}).Status()
+	return err == nil && op.Kind == "xui-install-v1" && op.Status != "complete" && op.Status != "cancelled"
 }

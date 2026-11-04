@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -48,6 +49,40 @@ func (m *model) dialog() (string, []hitRegion) {
 		add(strings.TrimRight(row, " "))
 	}
 	switch m.screen {
+	case installationForm:
+		w := &m.wizard
+		summary := w.step == len(w.fields)
+		if !summary {
+			position, total := w.step+1, len(w.fields)
+			if w.fields[4].Value() != "dns" {
+				total--
+				if w.step > 5 {
+					position--
+				}
+			}
+			add(fmt.Sprintf("Step %d / %d", position, total))
+			add(wizardFields[w.step].label)
+			y := add("[ " + cell(w.fields[w.step].View(), inner-4) + " ]")
+			hits = append(hits, hitRegion{2, y, inner, 1, "wizard-field", 0})
+			add("")
+			add(wizardFields[w.step].hint)
+		} else {
+			add(cell("Target: "+clean(m.installer().InstallationTarget()), inner))
+			for _, i := range []int{0, 1, 2} {
+				label := []string{"Base", "Website", "Panel"}[i]
+				add(cell(label+": "+clean(w.fields[i].Value()), inner))
+			}
+			add("Reality · Trojan · Hysteria2")
+			add("Credentials stay private. Deploy follows review.")
+		}
+		add("")
+		next := "Next"
+		offset := 1
+		if summary {
+			next = "Prepare draft"
+			offset = 0
+		}
+		buttons(dialogButton{next, "wizard-next", w.focus == offset}, dialogButton{"Back", "wizard-back", w.focus == offset+1}, dialogButton{"Cancel", "wizard-cancel", w.focus == offset+2})
 	case password:
 		for i, label := range []string{"New password", "Repeat password"} {
 			add(label)
@@ -64,7 +99,10 @@ func (m *model) dialog() (string, []hitRegion) {
 		buttons(dialogButton{"Save desired", "save", m.focus == 2}, dialogButton{"Cancel", "close", m.focus == 3})
 	case confirmation:
 		verb := map[string]string{"apply": "Apply", "resume": "Resume", "cancel": "Cancel preparation"}[m.confirmAction]
-		question := map[string]string{"apply": "Apply the reviewed password change?", "resume": "Resume from the saved checkpoint?", "cancel": "Cancel preparation before effects?"}[m.confirmAction]
+		question := map[string]string{"apply": "Apply the reviewed changes?", "resume": "Resume from the saved checkpoint?", "cancel": "Cancel preparation before effects?"}[m.confirmAction]
+		if m.confirmAction == "apply" && m.review != nil && m.review.Kind == "xui-install-v1" {
+			verb, question = "Deploy", "Deploy the reviewed stack and start its services?"
+		}
 		add(question)
 		add("")
 		add("ID: " + clean(m.confirmID))

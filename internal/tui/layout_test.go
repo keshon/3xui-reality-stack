@@ -132,3 +132,49 @@ func TestDialogsRestoreReportAndScrollPosition(t *testing.T) {
 		t.Fatal("function keys did not work while the main menu was open")
 	}
 }
+
+func TestAccessChromeHasExactCellsAndVisibleMouseTargets(t *testing.T) {
+	for _, size := range [][2]int{{40, 18}, {41, 19}, {60, 24}, {75, 24}, {76, 18}, {80, 24}, {100, 30}, {120, 40}, {160, 48}} {
+		b := &accessBackend{fakeBackend: fakeBackend{p: deployment.Plan{Stack: "fixture", Status: "unchanged", ReadOnly: true}}}
+		m := newModel(t.Context(), b, "SSH controller · /opt/example-stack")
+		finish(m, m.Init())
+		m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
+		finish(m, m.dispatch("access"))
+		view, hits := m.compose()
+		rows := strings.Split(ansi.Strip(view.Content), "\n")
+		if len(rows) != size[1] {
+			t.Fatalf("frame height at %v: %d", size, len(rows))
+		}
+		for y, row := range rows {
+			if ansi.StringWidth(row) != size[0] {
+				t.Fatalf("frame width at %v row %d: %d", size, y, ansi.StringWidth(row))
+			}
+		}
+		if !strings.HasPrefix(rows[0], " Workspace ") || strings.Contains(rows[0], "STACK") || !strings.HasPrefix(rows[1], "┌") {
+			t.Fatalf("extra branding/header space at %v", size)
+		}
+		if !strings.Contains(rows[len(rows)-1], "SSH controller") || strings.Contains(view.Content, "10Quit") {
+			t.Fatalf("target footer or removed function bar is wrong at %v", size)
+		}
+		for _, hit := range hits {
+			if hit.x < 0 || hit.y < 0 || hit.x+hit.width > size[0] || hit.y+hit.height > size[1] {
+				t.Fatalf("mouse region outside frame at %v: %+v", size, hit)
+			}
+			text := ansi.Cut(rows[hit.y], hit.x, hit.x+hit.width)
+			switch hit.action {
+			case "menu":
+				if strings.TrimSpace(text) != topMenus[hit.index] {
+					t.Fatalf("menu region misses visible label at %v: %q", size, text)
+				}
+			case "navigate":
+				if !strings.Contains(text, m.navigationLabels()[hit.index]) {
+					t.Fatalf("navigation region misses visible label at %v: %q", size, text)
+				}
+			case "toggle-secrets":
+				if !strings.Contains(text, "Show password") {
+					t.Fatalf("context region misses visible control at %v: %q", size, text)
+				}
+			}
+		}
+	}
+}

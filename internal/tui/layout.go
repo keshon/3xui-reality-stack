@@ -17,7 +17,7 @@ var (
 	bar      = lipgloss.NewStyle().Foreground(lipgloss.Color("#D9E2EB")).Background(lipgloss.Color("#263B4C"))
 )
 
-var screenNames = []string{"Overview", "Status", "Plan", "Operation", "Panel password", "Review", "Confirm action", "Help"}
+var screenNames = []string{"Overview", "Status", "Plan", "Operation", "Panel password", "Review", "Confirm action", "Help", "New installation", "Installation readiness", "Access"}
 
 // cell and panel always return fixed cell dimensions, including ANSI and wide
 // characters. Layout has one owner; individual screens only supply content.
@@ -71,11 +71,11 @@ func inset(body string) string {
 
 func (m *model) navigation() string {
 	var rows []string
-	labels := []string{"Status", "Plan", "Operation"}
-	if m.supports("configure", "apply") {
-		labels = append(labels, "Panel password")
+	labels := m.navigationLabels()
+	current := map[screen]int{}
+	for i, s := range m.navigationScreens() {
+		current[s] = i
 	}
-	current := map[screen]int{status: 0, plan: 1, operation: 2, password: 3}
 	for i, label := range labels {
 		line := fmt.Sprintf(" %d  %s", i+1, label)
 		active := m.navFocused && m.selected == i
@@ -96,7 +96,10 @@ func (m *model) navigation() string {
 }
 
 func (m *model) accessMode() string {
-	if m.supports("apply") {
+	if m.installer() != nil && !m.state.report.Baseline {
+		return "Installation"
+	}
+	if m.supports("configure", "apply") {
 		return "Password edits"
 	}
 	return "Read only"
@@ -110,12 +113,12 @@ func (m *model) overview() string {
 		return clean(s)
 	}
 	return fmt.Sprintf("\n%s\n\n  Stack       %s\n  Runtime     %s\n  Plan        %s\n  Operation   %s\n\n%s\n%s",
-		accent.Render(" Existing installation"), value(m.state.report.Stack), value(m.state.runtime.Status), value(m.state.plan.Status), value(m.state.operation.Status),
+		accent.Render(" Stack workspace"), value(m.state.report.Stack), value(m.state.runtime.Status), value(m.state.plan.Status), value(m.state.operation.Status),
 		muted.Render(" Choose a task from the navigation panel."), muted.Render(" F9 opens the menu. F1 shows keyboard help."))
 }
 
 func (m *model) workspace(page screen) string {
-	width, height := m.width, m.height-4
+	width, height := m.width, m.height-3
 	copy := *m
 	copy.screen = page
 	body := m.viewport.View()
@@ -166,8 +169,8 @@ func (m *model) scrollIndicator() string {
 }
 
 func (m *model) menuBar() string {
-	line := accent.Render(" STACK ")
-	for i, label := range []string{"Workspace", "Actions", "Session"} {
+	line := ""
+	for i, label := range topMenus {
 		item := " " + label + " "
 		if m.menuOpen && m.menu == i {
 			item = selected.Render(item)
@@ -189,26 +192,6 @@ func overlay(background, foreground string, x, y int) string {
 	return strings.Join(rows, "\n")
 }
 
-func (m *model) functionBar() string {
-	labels := []string{"Help", "Home", "Status", "Plan", "Reload", "Passwd", "Review", "Operat", "Menu", "Quit"}
-	var cells []string
-	for _, item := range m.footerCells() {
-		i, width := item.index, item.width
-		label := labels[i]
-		action := footerActions[i]
-		style := bar
-		foreground := "#D9E2EB"
-		if !m.available(action) || m.busy || m.screen == password || m.screen == confirmation || m.screen == help {
-			foreground = "#738394"
-			style = style.Foreground(lipgloss.Color(foreground))
-		}
-		number := fmt.Sprintf("%d", i+1)
-		label = cell(label, width-len(number)-1)
-		cells = append(cells, paint(style.Render(accent.Render(number)+label+" "), foreground, "#263B4C"))
-	}
-	return strings.Join(cells, "")
-}
-
 func (m *model) render() tea.View {
 	v, _ := m.compose()
 	return v
@@ -222,7 +205,7 @@ func (m *model) compose() (tea.View, []hitRegion) {
 	}
 	regions := m.chromeRegions()
 	page := m.screen
-	if page == password || page == confirmation {
+	if page == password || page == confirmation || page == installationForm {
 		page = m.modalBase
 	}
 	if page == help {
@@ -249,7 +232,7 @@ func (m *model) compose() (tea.View, []hitRegion) {
 	}
 	mode := " " + m.accessMode() + " "
 	connection := cell(" "+clean(m.title), max(0, m.width-ansi.StringWidth(mode))) + accent.Render(mode)
-	frame := m.menuBar() + "\n" + paint(bar.Render(connection), "#D9E2EB", "#263B4C") + "\n" + m.workspace(page) + "\n" + muted.Render(cell(" "+clean(message), m.width)) + "\n" + m.functionBar()
+	frame := m.menuBar() + "\n" + m.workspace(page) + "\n" + muted.Render(cell(" "+clean(message), m.width)) + "\n" + paint(bar.Render(connection), "#D9E2EB", "#263B4C")
 	if m.menuOpen {
 		items := m.menuItems()
 		var rows []string
@@ -263,13 +246,13 @@ func (m *model) compose() (tea.View, []hitRegion) {
 			rows = append(rows, line)
 		}
 		x := m.menuX()
-		regions = m.topAndFooterRegions()
+		regions = m.menuRegions()
 		for i := range items {
 			regions = append(regions, hitRegion{x + 1, 2 + i, 28, 1, "menu-item", i})
 		}
-		frame = overlay(frame, panel([]string{"Workspace", "Actions", "Session"}[m.menu], strings.Join(rows, "\n"), 30, len(rows)+2), x, 1)
+		frame = overlay(frame, panel(topMenus[m.menu], strings.Join(rows, "\n"), 30, len(rows)+2), x, 1)
 	}
-	if m.screen == password || m.screen == confirmation || m.screen == help {
+	if m.screen == password || m.screen == confirmation || m.screen == help || m.screen == installationForm {
 		dialog, hits := m.dialog()
 		x, y := (m.width-lipgloss.Width(dialog))/2, (m.height-lipgloss.Height(dialog))/2
 		frame = overlay(frame, dialog, x, y)

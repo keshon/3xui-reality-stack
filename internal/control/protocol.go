@@ -140,6 +140,12 @@ func Serve(ctx context.Context, in io.Reader, out io.Writer, reader Reader) erro
 			reply.Error = "invalid_params"
 		} else {
 			switch req.Method {
+			case "access":
+				if access, ok := reader.(AccessReader); ok {
+					result, err = access.Access(ctx)
+				} else {
+					reply.Error = "unsupported_method"
+				}
 			case "initialize":
 				var params initializationParams
 				initializer, ok := reader.(Initializer)
