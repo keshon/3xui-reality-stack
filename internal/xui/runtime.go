@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -61,6 +62,10 @@ func localDocker(ctx context.Context, args ...string) ([]byte, error) {
 }
 
 func localDockerTimeout(ctx context.Context, timeout time.Duration, args ...string) ([]byte, error) {
+	return localDockerInput(ctx, timeout, nil, args...)
+}
+
+func localDockerInput(ctx context.Context, timeout time.Duration, input []byte, args ...string) ([]byte, error) {
 	if runtime.GOOS != "linux" {
 		return nil, errors.New("runtime discovery requires the VPS's local Linux Docker socket")
 	}
@@ -68,12 +73,32 @@ func localDockerTimeout(ctx context.Context, timeout time.Duration, args ...stri
 	defer cancel()
 	// Ignore DOCKER_HOST and CLI contexts, which may point at a different server.
 	cmd := exec.CommandContext(ctx, "docker", append([]string{"--host", "unix:///var/run/docker.sock"}, args...)...)
+	cmd.Stdin = bytes.NewReader(input)
 	var output boundedOutput
 	cmd.Stdout, cmd.Stderr = &output, io.Discard
 	if cmd.Run() != nil {
 		return nil, errors.New("local Docker inspection failed")
 	}
 	return output.Bytes(), nil
+}
+
+// Fresh installs execute immutable references resolved from the pinned tag.
+// Accept those only when local image metadata proves both the same repository
+// digest and image ID; a matching repository name alone is insufficient.
+func matchesPolicyImage(ctx context.Context, run dockerCommand, c container, policy string) bool {
+	if c.Image == policy {
+		return true
+	}
+	_, digest, ok := strings.Cut(c.Image, "@")
+	if !ok || !validImageID(digest) || imageRepository(c.Image) != imageRepository(policy) {
+		return false
+	}
+	data, err := run(ctx, "image", "inspect", policy, "--format", `{"id":{{json .Id}},"digests":{{json .RepoDigests}}}`)
+	if err != nil {
+		return false
+	}
+	id, reference, err := resolvedWebImage(data, policy)
+	return err == nil && id == c.ImageID && reference == c.Image
 }
 
 // Runtime checks the existing installation without login, provisioning or
@@ -133,12 +158,36 @@ func (s Stack) observeAppliedRuntime(ctx context.Context, root string, applied c
 		if _, err := time.Parse(time.RFC3339Nano, c.StartedAt); err != nil {
 			return c, false
 		}
+		// Docker enumerates mounts from an unordered map. Freeze a canonical
+		// observation so harmless ordering changes do not look like replacement.
+		sort.Slice(c.Mounts, func(i, j int) bool {
+			a, b := c.Mounts[i], c.Mounts[j]
+			if a.Destination != b.Destination {
+				return a.Destination < b.Destination
+			}
+			if a.Source != b.Source {
+				return a.Source < b.Source
+			}
+			if a.Type != b.Type {
+				return a.Type < b.Type
+			}
+			return !a.RW && b.RW
+		})
+		for _, bindings := range c.Ports {
+			sort.Slice(bindings, func(i, j int) bool {
+				if bindings[i].HostIP != bindings[j].HostIP {
+					return bindings[i].HostIP < bindings[j].HostIP
+				}
+				return bindings[i].HostPort < bindings[j].HostPort
+			})
+		}
 		return c, true
 	}
 	panel, panelOK := inspect("3x-ui")
 	observation.Panel = panel
 	add("panel-container", panelOK && panel.Running, "3x-ui container is unavailable, stopped or cannot be inspected")
-	add("panel-image", panelOK && panel.Image == policy.PanelImage, "panel image reference differs from the pinned policy")
+	panelImageOK := panelOK && matchesPolicyImage(ctx, run, panel, policy.PanelImage)
+	add("panel-image", panelImageOK, "panel image reference differs from the pinned policy")
 	expected, pathErr := filepath.EvalSymlinks(filepath.Join(root, "xui", "db"))
 	matching, total := false, 0
 	for _, mount := range panel.Mounts {
@@ -150,7 +199,7 @@ func (s Stack) observeAppliedRuntime(ctx context.Context, root string, applied c
 		matching = pathErr == nil && err == nil && source == expected && mount.Type == "bind" && mount.RW
 	}
 	add("database-ownership", panelOK && total == 1 && matching, "panel database is not the writable bind mount owned by this checkout")
-	if panelOK && panel.Running && panel.Image == policy.PanelImage && total == 1 && matching {
+	if panelOK && panel.Running && panelImageOK && total == 1 && matching {
 		// Use the inspected immutable ID, not a name that could be reassigned.
 		data, err := run(ctx, "exec", panel.ID, "/app/x-ui", "-v")
 		observation.PanelVersion = strings.TrimSpace(string(data))
@@ -161,7 +210,7 @@ func (s Stack) observeAppliedRuntime(ctx context.Context, root string, applied c
 	traefik, traefikOK := inspect("traefik")
 	observation.Traefik = traefik
 	add("traefik-container", traefikOK && traefik.Running, "Traefik container is unavailable, stopped or cannot be inspected")
-	add("traefik-image", traefikOK && traefik.Image == policy.TraefikImage, "Traefik image reference differs from the pinned policy")
+	add("traefik-image", traefikOK && matchesPolicyImage(ctx, run, traefik, policy.TraefikImage), "Traefik image reference differs from the pinned policy")
 	bind := applied.Env["MANAGEMENT_BIND"]
 	if bind == "" {
 		bind = "127.0.0.1"

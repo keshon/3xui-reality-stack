@@ -1,5 +1,5 @@
 // Command stackctl-go is the experimental Go controller. Deployment writes
-// require explicit selection of its experimental password adapter.
+// require explicit selection of an experimental execution adapter.
 package main
 
 import (

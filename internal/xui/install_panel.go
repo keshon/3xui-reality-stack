@@ -36,7 +36,7 @@ func bootstrapCreateArgs(root string, snapshot installRuntimeSnapshot, intent pa
 	}
 }
 
-// SQLite may create these sidecars while the owned panel is running. This
+// SQLite and the pinned panel's metrics store create these sidecars. This
 // exception belongs only to an installation with durable panel startup intent.
 func validateBootstrapDatabase(dir string) error {
 	entries, err := os.ReadDir(dir)
@@ -46,7 +46,7 @@ func validateBootstrapDatabase(dir string) error {
 	for _, entry := range entries {
 		name := entry.Name()
 		info, err := os.Lstat(filepath.Join(dir, name))
-		if err != nil || !info.Mode().IsRegular() || info.Size() > 256<<20 || (name != "x-ui.db" && name != "x-ui.db-wal" && name != "x-ui.db-shm" && name != "x-ui.db-journal") {
+		if err != nil || !info.Mode().IsRegular() || info.Size() > 256<<20 || (name != "x-ui.db" && name != "x-ui.db-wal" && name != "x-ui.db-shm" && name != "x-ui.db-journal" && name != "system_metrics.gob" && name != "system_metrics.gob.tmp") {
 			return errors.New("unexpected files in bootstrap database directory")
 		}
 	}
@@ -279,16 +279,22 @@ func (w *installRuntime) startPanel(ctx context.Context, dir string, snapshot in
 	if !current.Running || current.Networks["bridge"].NetworkID != started.NetworkID || hasRestarted && identityOfPanel(current) != restarted || !hasRestartIntent && identityOfPanel(current) != started {
 		return errors.New("bootstrap panel was unexpectedly stopped, restarted or changed")
 	}
-	endpoint := w.panelEndpoint
-	if endpoint == nil {
-		endpoint = func(current webContainer, prefix string) (*Panel, error) {
-			return NewPanel("http://" + net.JoinHostPort("127.0.0.1", bootstrapPort(current)) + strings.TrimRight(prefix, "/"))
-		}
-	}
+	endpoint := w.privatePanelEndpoint
 	if !hasRestartIntent {
 		p, err := endpoint(current, "")
 		if err != nil {
 			return err
+		}
+		if w.panelEndpoint == nil {
+			if err := waitPanelHTTP(ctx, p); err != nil {
+				p.transport.CloseIdleConnections()
+				return err
+			}
+			observed, err := observe()
+			if err != nil || identityOfPanel(observed) != started {
+				p.transport.CloseIdleConnections()
+				return errors.New("bootstrap panel changed before initialization")
+			}
 		}
 		err = bootstrap.prepare(ctx, p)
 		p.transport.CloseIdleConnections()
@@ -323,6 +329,12 @@ func (w *installRuntime) startPanel(ctx context.Context, dir string, snapshot in
 	if err != nil {
 		return err
 	}
+	if w.panelEndpoint == nil {
+		if err := waitPanelHTTP(ctx, p); err != nil {
+			p.transport.CloseIdleConnections()
+			return err
+		}
+	}
 	err = bootstrap.verify(ctx, p)
 	p.transport.CloseIdleConnections()
 	if err != nil {
@@ -336,4 +348,59 @@ func (w *installRuntime) startPanel(ctx context.Context, dir string, snapshot in
 		return errors.New("initialized panel changed during readiness verification")
 	}
 	return nil
+}
+
+func (w *installRuntime) privatePanelEndpoint(current webContainer, prefix string) (*Panel, error) {
+	if w.panelEndpoint != nil {
+		return w.panelEndpoint(current, prefix)
+	}
+	return NewPanel("http://" + net.JoinHostPort("127.0.0.1", bootstrapPort(current)) + strings.TrimRight(prefix, "/"))
+}
+
+func (w *installRuntime) provisionPanel(ctx context.Context, dir string, snapshot installRuntimeSnapshot) error {
+	var c config
+	if json.Unmarshal(snapshot.Binding.Inputs[".stack/config.json"], &c) != nil {
+		return errors.New("invalid frozen provisioning configuration")
+	}
+	web, err := w.webIntent(ctx, dir, snapshot)
+	if err != nil {
+		return err
+	}
+	var intent panelIntent
+	if ok, err := readJSON(filepath.Join(dir, "panel-intent.json"), &intent, true); err != nil || !ok {
+		return errors.New("panel startup intent is unavailable")
+	}
+	intent, err = w.panelIntent(ctx, dir, snapshot, web)
+	if err != nil {
+		return err
+	}
+	var saved panelIdentity
+	if ok, err := readJSON(filepath.Join(dir, "panel-restarted.json"), &saved, true); err != nil || !ok {
+		return errors.New("panel initialization receipt is unavailable")
+	}
+	observe := func() (webContainer, error) {
+		found, err := w.observeInstallServices(ctx, snapshot, web, dir, &intent)
+		if err != nil {
+			return webContainer{}, err
+		}
+		current := found[panelContainerName(snapshot.Owner)]
+		if !current.Running || identityOfPanel(current) != saved {
+			return webContainer{}, errors.New("initialized provisioning target changed")
+		}
+		return current, nil
+	}
+	current, err := observe()
+	if err != nil {
+		return err
+	}
+	panel, err := w.privatePanelEndpoint(current, c.Env["PANEL_PATH"])
+	if err != nil {
+		return err
+	}
+	defer panel.transport.CloseIdleConnections()
+	session, err := panel.login(ctx, c.Env["PANEL_USER"], c.Env["PANEL_PASS"])
+	if err != nil {
+		return err
+	}
+	return provisionFreshPanel(ctx, dir, c, session, func() error { _, err := observe(); return err })
 }

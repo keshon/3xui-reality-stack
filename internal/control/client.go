@@ -46,6 +46,9 @@ func (c *Client) Close() error {
 	return nil
 }
 
+// Methods returns the negotiated capabilities without exposing protocol state.
+func (c *Client) Methods() []string { return append([]string(nil), c.methods...) }
+
 func (c *Client) call(ctx context.Context, method string, target any) error {
 	return c.callParams(ctx, method, nil, target)
 }

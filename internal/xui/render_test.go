@@ -99,7 +99,7 @@ func TestRenderedTopologyKeepsSocketOwnershipAndRoutes(t *testing.T) {
 			} `json:"stores"`
 		} `json:"tls"`
 	}
-	if json.Unmarshal(files["traefik/dynamic/tls.json"], &tls) != nil || tls.TLS.Stores["default"].DefaultCertificate["certFile"] != "/certs/certs/www.example.test.crt" {
+	if json.Unmarshal(files["traefik/dynamic/tls.yml"], &tls) != nil || tls.TLS.Stores["default"].DefaultCertificate["certFile"] != "/certs/certs/www.example.test.crt" {
 		t.Fatal("certificate mount and default certificate path differ")
 	}
 }

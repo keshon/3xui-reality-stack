@@ -32,7 +32,7 @@ type composeService struct {
 
 var renderedFiles = []string{
 	"xui/compose.json", "traefik/compose.json", "decoy/compose.json",
-	"traefik/dynamic/tls.json", "decoy/nginx.conf",
+	"traefik/dynamic/tls.yml", "decoy/nginx.conf",
 	"decoy/site/index.html", "decoy/site/about.html", "decoy/site/style.css",
 	"decoy/site/robots.txt", "decoy/site/favicon.svg",
 }
@@ -149,7 +149,7 @@ func renderDeployment(c config) (map[string][]byte, error) {
 		"options": map[string]any{"default": map[string]any{"minVersion": "VersionTLS12", "sniStrict": false}},
 	}}
 	data, _ := json.MarshalIndent(tls, "", "  ")
-	files["traefik/dynamic/tls.json"] = append(data, '\n')
+	files["traefik/dynamic/tls.yml"] = append(data, '\n')
 	for _, name := range renderedFiles[4:] {
 		source := strings.Replace(name, "decoy/site/", "decoy/site.example/", 1)
 		data, err := stackassets.Decoy(source)

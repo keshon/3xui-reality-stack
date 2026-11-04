@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 
 	"github.com/keshon/3xui-reality-stack/internal/deployment"
 )
@@ -49,7 +50,7 @@ func (s Stack) ReviewState(ctx context.Context, root string) (deployment.ReviewS
 		return deployment.ReviewSpec{}, err
 	}
 	for _, name := range passwordInputs {
-		if !bytes.Equal(before[name], after[name]) {
+		if !reflect.DeepEqual(before[name], after[name]) {
 			return deployment.ReviewSpec{}, errors.New("configuration changed during review")
 		}
 	}

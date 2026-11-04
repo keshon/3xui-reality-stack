@@ -86,9 +86,10 @@ lock_owned=1
 target=$prefix/$version
 [[ ! -L $target ]] || fail 'Refusing a symlinked release directory.'
 if [[ -e $target ]]; then
-    [[ -d $target && -f $target/stackctl-go && ! -L $target/stackctl-go ]] || fail 'Existing release directory is not a controller installation.'
+    [[ -d $target && -f $target/stackctl-go && -x $target/stackctl-go && ! -L $target/stackctl-go ]] || fail 'Existing release directory is not a controller installation.'
     actual=$(cd "$target" && sha256sum stackctl-go)
     [[ ${actual%% *} == "$expected" ]] || fail 'Existing release differs; refusing to overwrite it.'
+    [[ -f $target/SHA256SUMS && ! -L $target/SHA256SUMS && $(< "$target/SHA256SUMS") == "$expected  stackctl-go" ]] || fail 'Existing release checksum manifest differs; refusing to overwrite it.'
 else
     stage=$(mktemp -d "$prefix/.install.XXXXXX")
     mv -- "$temporary/$asset" "$stage/stackctl-go"

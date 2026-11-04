@@ -6,10 +6,59 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/keshon/3xui-reality-stack/internal/deployment"
 )
+
+func TestRuntimeObservationIgnoresDockerEnumerationOrder(t *testing.T) {
+	root := passwordFixture(t)
+	stack := passwordTestStack(root)
+	original := stack.docker
+	reverse, changed := false, false
+	stack.docker = func(ctx context.Context, args ...string) ([]byte, error) {
+		data, err := original(ctx, args...)
+		if err != nil || args[0] != "inspect" {
+			return data, err
+		}
+		var c container
+		if json.Unmarshal(data, &c) != nil {
+			t.Fatal("invalid runtime fixture")
+		}
+		c.Mounts = append(c.Mounts, c.Mounts[0])
+		c.Mounts[1].Destination = "/certs"
+		c.Mounts[1].Source = filepath.Join(root, "shared/certs")
+		if changed {
+			c.Mounts[1].RW = false
+		}
+		if err := json.Unmarshal([]byte(`{"443/tcp":[{"HostIp":"0.0.0.0","HostPort":"443"},{"HostIp":"::","HostPort":"443"}],"8443/tcp":[{"HostIp":"127.0.0.1","HostPort":"2053"}]}`), &c.Ports); err != nil {
+			t.Fatal(err)
+		}
+		if reverse {
+			slices.Reverse(c.Mounts)
+			for _, ports := range c.Ports {
+				slices.Reverse(ports)
+			}
+		}
+		return json.Marshal(c)
+	}
+	report, before, err := stack.observeRuntime(t.Context(), root)
+	if err != nil || report.Status != "compatible" {
+		t.Fatal("runtime fixture is not compatible")
+	}
+	reverse = true
+	report, after, err := stack.observeRuntime(t.Context(), root)
+	if err != nil || report.Status != "compatible" || !reflect.DeepEqual(before, after) {
+		t.Fatal("enumeration order changed runtime identity")
+	}
+	changed = true
+	_, after, err = stack.observeRuntime(t.Context(), root)
+	if err != nil || reflect.DeepEqual(before, after) {
+		t.Fatal("normalization hid a changed mount permission")
+	}
+}
 
 func TestRuntimeIsRecheckedAfterAuthenticatedPreservationRead(t *testing.T) {
 	root := passwordFixture(t)

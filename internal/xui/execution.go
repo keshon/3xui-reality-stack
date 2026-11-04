@@ -59,7 +59,14 @@ func managedPanel(binding passwordBinding) (*Panel, error) {
 	if json.Unmarshal(binding.Inputs[".stack/applied.json"], &applied) != nil || applied.Version != 1 || !valid(applied.Config) {
 		return nil, errors.New("invalid reviewed management configuration")
 	}
-	env := applied.Config.Env
+	return managedConfigurationPanel(applied.Config)
+}
+
+func managedConfigurationPanel(c config) (*Panel, error) {
+	if !valid(c) {
+		return nil, errors.New("invalid management configuration")
+	}
+	env := c.Env
 	domain, prefix := env["PANEL_DOMAIN"], strings.TrimRight(env["PANEL_PATH"], "/")
 	if !panelDomain(domain) || !panelPath(prefix) {
 		return nil, errors.New("management domain or panel path is invalid")

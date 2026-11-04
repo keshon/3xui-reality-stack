@@ -30,6 +30,12 @@ func readInstallDraft(root string, ownOperation, started bool) (initialization, 
 }
 
 func readInstallDraftPhase(root string, ownOperation, started, panelStarted bool) (initialization, map[string][]byte, error) {
+	return readInstallDraftCommit(root, ownOperation, started, panelStarted, nil)
+}
+
+// Only commit replay may admit its exact, already frozen applied record.
+// Initialization, preflight and review continue to reject every applied root.
+func readInstallDraftCommit(root string, ownOperation, started, panelStarted bool, applied []byte) (initialization, map[string][]byte, error) {
 	fail := func() (initialization, map[string][]byte, error) {
 		return initialization{}, nil, errors.New("initialization draft is absent, changed or already in use")
 	}
@@ -42,7 +48,13 @@ func readInstallDraftPhase(root string, ownOperation, started, panelStarted bool
 		return fail()
 	}
 	if _, err := os.Lstat(filepath.Join(root, ".stack/applied.json")); !os.IsNotExist(err) {
-		return fail()
+		if len(applied) == 0 {
+			return fail()
+		}
+		actual, err := privatePromotionFile(filepath.Join(root, ".stack"), "applied.json", 4<<20)
+		if err != nil || !bytes.Equal(actual, applied) {
+			return fail()
+		}
 	}
 	if err := validateDraftDirectories(root); err != nil {
 		return fail()

@@ -29,7 +29,7 @@ func TestInitializedRuntimeLayoutKeepsSecretsPrivateAndSiteReadable(t *testing.T
 		for name, want := range map[string]os.FileMode{
 			".": 0700, ".env": 0600, ".stack/config.json": 0600,
 			"decoy/site": 0755, "decoy/site/index.html": 0644, "decoy/nginx.conf": 0644,
-			"traefik/dynamic": 0755, "traefik/dynamic/tls.json": 0644,
+			"traefik/dynamic": 0755, "traefik/dynamic/tls.yml": 0644,
 			"xui/db": 0700, "traefik/data/acme": 0700, acmeStateFile: 0600,
 			"shared/certs/certs": 0755, "shared/certs/private": 0700,
 		} {

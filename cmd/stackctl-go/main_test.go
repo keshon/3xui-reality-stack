@@ -243,3 +243,29 @@ func TestUnsupportedCommandsCannotExecute(t *testing.T) {
 		}
 	}
 }
+
+func TestCLIInstallationOptInIsLocalAndSeparate(t *testing.T) {
+	for _, args := range [][]string{
+		{"serve", "--stdio", "--experimental-install"},
+		{"tui", "--experimental-install"},
+		{"initialize", "--config-stdin", "--experimental-install"},
+		{"review", "--experimental-install", "--experimental-password-writes"},
+	} {
+		var out bytes.Buffer
+		if err := runContext(t.Context(), args, nil, &out); err == nil || !strings.Contains(err.Error(), "usage:") {
+			t.Fatalf("invalid installation option combination accepted: %v", args)
+		}
+	}
+	root := t.TempDir()
+	for _, enabled := range []bool{false, true} {
+		args := []string{"apply", "--root", root, "--confirm", strings.Repeat("a", 32)}
+		if enabled {
+			args = append(args, "--experimental-install")
+		}
+		var out bytes.Buffer
+		err := runContext(t.Context(), args, nil, &out)
+		if err == nil || (err == deployment.ErrExecutionUnavailable) == enabled {
+			t.Fatal("CLI did not select only the explicitly enabled installation adapter", err)
+		}
+	}
+}

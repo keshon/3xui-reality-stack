@@ -72,10 +72,8 @@ func decodePasswordBinding(raw json.RawMessage) (passwordBinding, error) {
 	if !json.Valid(raw) || d.Decode(&binding) != nil || len(binding.Inputs) != len(passwordInputs) || len(binding.Policy) == 0 || !dockerID(binding.Runtime.Panel.ID) || !dockerID(binding.Runtime.Traefik.ID) {
 		return binding, errors.New("invalid password review binding")
 	}
-	for _, name := range passwordInputs {
-		if binding.Inputs[name] == nil {
-			return binding, errors.New("incomplete password review inputs")
-		}
+	if !validPasswordInputs(binding.Inputs) {
+		return binding, errors.New("incomplete password review inputs")
 	}
 	return binding, nil
 }
@@ -91,7 +89,12 @@ func readPasswordInputs(root string) (map[string][]byte, error) {
 	result := map[string][]byte{}
 	for _, name := range passwordInputs {
 		path := filepath.Join(root, name)
-		if info, err := os.Lstat(path); err != nil || !info.Mode().IsRegular() {
+		info, err := os.Lstat(path)
+		if name == "nodes.txt" && os.IsNotExist(err) {
+			result[name] = nil
+			continue
+		}
+		if err != nil || !info.Mode().IsRegular() {
 			return nil, errors.New("password change requires regular managed input files")
 		}
 		data, err := os.ReadFile(path)
@@ -100,7 +103,34 @@ func readPasswordInputs(root string) (map[string][]byte, error) {
 		}
 		result[name] = data
 	}
+	if !validPasswordInputs(result) {
+		return nil, errors.New("password input presence differs from the managed baseline")
+	}
 	return result, nil
+}
+
+// A standalone installation may never have generated nodes.txt. Preserve that
+// absence explicitly; an empty file appearing during a review is still drift.
+func validPasswordInputs(inputs map[string][]byte) bool {
+	if len(inputs) != len(passwordInputs) {
+		return false
+	}
+	for _, name := range passwordInputs {
+		data, exists := inputs[name]
+		if !exists || name != "nodes.txt" && data == nil {
+			return false
+		}
+	}
+	if inputs["nodes.txt"] != nil {
+		return true
+	}
+	var previous baseline
+	var desired config
+	if json.Unmarshal(inputs[".stack/applied.json"], &previous) != nil || json.Unmarshal(inputs[".stack/config.json"], &desired) != nil {
+		return false
+	}
+	hash, exists := previous.Hashes["nodes.txt"]
+	return exists && hash == nil && len(previous.Config.Nodes) == 0 && len(desired.Nodes) == 0
 }
 
 func (w *PasswordChange) Prepare(ctx context.Context, dir string) error {
@@ -118,7 +148,7 @@ func (w *PasswordChange) Prepare(ctx context.Context, dir string) error {
 		return err
 	}
 	for _, name := range passwordInputs {
-		if !bytes.Equal(current[name], w.binding.Inputs[name]) {
+		if !reflect.DeepEqual(current[name], w.binding.Inputs[name]) {
 			return errors.New("reviewed inputs changed")
 		}
 	}
@@ -177,8 +207,11 @@ func (w *PasswordChange) open(dir string) (passwordSnapshot, error) {
 	if err != nil || !exists || s.Version != 1 || w.panel == nil || s.Endpoint != w.panel.base || len(s.Inputs) != len(passwordInputs) || len(s.Targets) != 2 || len(s.Preserved) == 0 {
 		return s, errors.New("invalid password recovery snapshot")
 	}
+	if !validPasswordInputs(s.Inputs) {
+		return s, errors.New("incomplete password recovery inputs")
+	}
 	for _, name := range passwordInputs {
-		if s.Inputs[name] == nil || !bytes.Equal(s.Inputs[name], w.binding.Inputs[name]) {
+		if !reflect.DeepEqual(s.Inputs[name], w.binding.Inputs[name]) {
 			return s, errors.New("incomplete password recovery inputs")
 		}
 	}
@@ -305,7 +338,7 @@ func (w *PasswordChange) checkLocal(s passwordSnapshot) error {
 		return err
 	}
 	for _, name := range passwordInputs {
-		if !bytes.Equal(current[name], s.Inputs[name]) && (s.Targets[name] == nil || !bytes.Equal(current[name], s.Targets[name])) {
+		if !reflect.DeepEqual(current[name], s.Inputs[name]) && (s.Targets[name] == nil || !reflect.DeepEqual(current[name], s.Targets[name])) {
 			return errors.New("local inputs changed outside this operation")
 		}
 	}

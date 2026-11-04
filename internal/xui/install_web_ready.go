@@ -16,6 +16,29 @@ import (
 	"github.com/keshon/3xui-reality-stack/internal/certificates"
 )
 
+// Issuance and the supervised export are asynchronous. A healthy first install
+// waits for both instead of requiring a manual resume during their normal delay.
+// Every retry keeps certificate validation and verified HTTPS probes intact.
+func waitWebCertificates(ctx context.Context, root string, inputs map[string][]byte) error {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := verifyWebCertificates(ctx, root, inputs); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return errors.New("certificate issuance, export or verified HTTPS readiness timed out")
+		case <-ticker.C:
+		}
+	}
+}
+
 func verifyWebCertificates(ctx context.Context, root string, inputs map[string][]byte) error {
 	var c config
 	if json.Unmarshal(inputs[".stack/config.json"], &c) != nil {

@@ -197,7 +197,7 @@ func initialArtifacts(c config) (map[string][]byte, error) {
 }
 
 func initializationReport() deployment.InitializationReport {
-	return deployment.InitializationReport{Stack: stackID, Status: "prepared", Files: append([]string(nil), initializationFiles...), CanApply: false, Observation: "private standalone configuration and deployment files only; bundled decoy is an example to replace; no applied baseline, certificate export service, certificates or services created; fresh-install execution is not implemented", Stages: []deployment.Action{
+	return deployment.InitializationReport{Stack: stackID, Status: "prepared", Files: append([]string(nil), initializationFiles...), CanApply: false, Observation: "private standalone configuration and deployment files only; bundled decoy is an example to replace; no applied baseline, certificate export service, certificates or services created; use local plan/review/apply with --experimental-install after host preflight", Stages: []deployment.Action{
 		{ID: "host", Resource: "host", Effects: []string{"inspect and review host resources and installation requirements"}},
 		{ID: "runtime", Resource: "docker", Effects: []string{"prepare reviewed Docker and network resources"}},
 		{ID: "services", Resource: "stack", Effects: []string{"validate deployment files, obtain certificates, configure panel, transports and accounts"}},

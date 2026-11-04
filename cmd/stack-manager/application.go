@@ -7,11 +7,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/keshon/3xui-reality-stack/internal/buildinfo"
 	"github.com/keshon/3xui-reality-stack/internal/console"
 	"github.com/keshon/3xui-reality-stack/internal/control"
 	"github.com/keshon/3xui-reality-stack/internal/sshclient"
+	"github.com/keshon/3xui-reality-stack/internal/tui"
 )
 
 type connector func(context.Context, sshclient.Options) (io.ReadWriteCloser, error)
@@ -21,7 +23,7 @@ func run(ctx context.Context, args []string, out io.Writer, connect connector) e
 }
 
 func runWithInput(ctx context.Context, args []string, in io.Reader, out io.Writer, connect connector) error {
-	const usage = "usage: stack-manager version\n       stack-manager <initialize|inspect|plan|runtime|preflight|review|operation|configure-password|apply|resume|cancel-preparation> --ssh ALIAS --root /absolute/deployment/path [--controller /absolute/binary/path]\ninitialize requires --config-stdin; configure-password requires --password-stdin; apply requires --confirm REVIEW_ID; recovery requires --operation OPERATION_ID.\n3x-ui password configuration and execution require --experimental-password-writes."
+	const usage = "usage: stack-manager version\n       stack-manager <tui|initialize|inspect|plan|runtime|preflight|review|operation|configure-password|apply|resume|cancel-preparation> --ssh ALIAS --root /absolute/deployment/path [--controller /absolute/binary/path]\ninitialize requires --config-stdin; configure-password requires --password-stdin; apply requires --confirm REVIEW_ID; recovery requires --operation OPERATION_ID.\n3x-ui password configuration and execution require --experimental-password-writes."
 	if len(args) == 1 && (args[0] == "version" || args[0] == "--version") {
 		_, err := fmt.Fprintln(out, buildinfo.Version)
 		return err
@@ -73,6 +75,10 @@ func runWithInput(ctx context.Context, args []string, in io.Reader, out io.Write
 		if err != nil {
 			return err
 		}
+	} else if args[0] == "tui" {
+		if *confirm != "" || *operation != "" {
+			return errors.New(usage)
+		}
 	} else {
 		if err := options.Validate(args[0]); err != nil {
 			return err
@@ -80,7 +86,7 @@ func runWithInput(ctx context.Context, args []string, in io.Reader, out io.Write
 	}
 	if *passwordWrites {
 		switch args[0] {
-		case "configure-password", "review", "apply", "resume", "cancel-preparation":
+		case "configure-password", "review", "apply", "resume", "cancel-preparation", "tui":
 		default:
 			return errors.New(usage)
 		}
@@ -89,11 +95,16 @@ func runWithInput(ctx context.Context, args []string, in io.Reader, out io.Write
 	if err != nil {
 		return err
 	}
-	client, err := control.Connect(ctx, stream)
+	handshakeCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+	client, err := control.Connect(handshakeCtx, stream)
+	cancel()
 	if err != nil {
 		return err
 	}
 	defer client.Close()
+	if args[0] == "tui" {
+		return tui.Run(ctx, client, in, out, "SSH: "+*alias)
+	}
 	if args[0] == "initialize" {
 		return console.Initialize(ctx, initial, out, client)
 	}

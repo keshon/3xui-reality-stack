@@ -1,11 +1,25 @@
 package xui
 
 import (
+	"context"
 	"crypto/x509"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
+
+func TestWebReadinessWaitHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	if err := waitWebCertificates(ctx, t.TempDir(), nil); err == nil {
+		t.Fatal("missing certificates became ready")
+	}
+	if time.Since(started) > time.Second {
+		t.Fatal("readiness wait ignored caller cancellation")
+	}
+}
 
 func TestWebReadinessVerifiesTLSAndExactPageWithoutFollowingRedirects(t *testing.T) {
 	for _, scenario := range []string{"ready", "untrusted", "wrong-page", "redirect"} {

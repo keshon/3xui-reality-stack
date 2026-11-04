@@ -104,6 +104,31 @@ func TestRuntimeDiscoveryUsesOwnedPinnedContainersOnly(t *testing.T) {
 	}
 }
 
+func TestRuntimeDigestMustResolveToPinnedImageID(t *testing.T) {
+	policy := "traefik:v3.7.12"
+	digest := "traefik@sha256:" + strings.Repeat("a", 64)
+	imageID := "sha256:" + strings.Repeat("b", 64)
+	run := func(_ context.Context, args ...string) ([]byte, error) {
+		if len(args) != 5 || strings.Join(args[:4], " ") != "image inspect "+policy+" --format" {
+			t.Fatal("unexpected image lookup")
+		}
+		return json.Marshal(map[string]any{"id": imageID, "digests": []string{digest}})
+	}
+	for _, scenario := range []struct {
+		ref, id string
+		want    bool
+	}{
+		{digest, imageID, true},
+		{digest, "sha256:" + strings.Repeat("c", 64), false},
+		{"traefik@sha256:" + strings.Repeat("d", 64), imageID, false},
+		{"foreign@sha256:" + strings.Repeat("a", 64), imageID, false},
+	} {
+		if got := matchesPolicyImage(t.Context(), run, container{Image: scenario.ref, ImageID: scenario.id}, policy); got != scenario.want {
+			t.Fatal("digest/image identity policy mismatch")
+		}
+	}
+}
+
 func TestRuntimeDiscoveryRejectsMissingManagedStateBeforeDocker(t *testing.T) {
 	run := func(context.Context, ...string) ([]byte, error) {
 		t.Fatal("Docker queried without managed configuration")

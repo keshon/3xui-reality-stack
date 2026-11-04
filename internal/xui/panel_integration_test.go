@@ -67,6 +67,17 @@ func TestPinnedPanelBackupRestore(t *testing.T) {
 				t.Error("refusing to remove a container without this test's ownership label")
 				return
 			}
+			if artifacts := os.Getenv("STACK_TEST_ARTIFACT_DIR"); t.Failed() && filepath.IsAbs(artifacts) {
+				if err := os.MkdirAll(artifacts, 0700); err != nil {
+					t.Error("cannot create private failure artifact directory")
+				} else {
+					logs, _ := docker("logs", "--tail", "40", name)
+					state, _ := docker("inspect", "--format", `{{json .State}}`, name)
+					if err := os.WriteFile(filepath.Join(artifacts, name+".log"), append(state, logs...), 0600); err != nil {
+						t.Error("cannot save private isolated-container diagnostics")
+					}
+				}
+			}
 			if _, err := docker("rm", "--force", "--volumes", name); err != nil {
 				t.Errorf("cannot clean up integration container %s", name)
 			}
@@ -92,27 +103,31 @@ func TestPinnedPanelBackupRestore(t *testing.T) {
 		}
 		return create(integrationPanelImage, args, command...)
 	}
-	startPanel := func(db string, basePath ...string) (*Panel, string) {
+	panelEndpoint := func(id, path string) *Panel {
 		t.Helper()
-		id := createPanel(db, true, "run")
-		if _, err := docker("start", id); err != nil {
-			t.Fatal("cannot start isolated panel")
-		}
 		data, err := docker("inspect", "--format", `{{json (index .NetworkSettings.Ports "2053/tcp")}}`, id)
 		var ports []struct{ HostIP, HostPort string }
 		if err != nil || json.Unmarshal(data, &ports) != nil || len(ports) != 1 || ports[0].HostIP != "127.0.0.1" || strings.Trim(ports[0].HostPort, "0123456789") != "" || ports[0].HostPort == "" {
 			t.Fatal("isolated panel does not have its expected loopback listener")
-		}
-		path := "/integration-panel"
-		if len(basePath) != 0 {
-			path = basePath[0]
 		}
 		panel, err := NewPanel("http://127.0.0.1:" + ports[0].HostPort + path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		t.Cleanup(panel.transport.CloseIdleConnections)
-		return panel, id
+		return panel
+	}
+	startPanel := func(db string, basePath ...string) (*Panel, string) {
+		t.Helper()
+		id := createPanel(db, true, "run")
+		if _, err := docker("start", id); err != nil {
+			t.Fatal("cannot start isolated panel")
+		}
+		path := "/integration-panel"
+		if len(basePath) > 0 {
+			path = basePath[0]
+		}
+		return panelEndpoint(id, path), id
 	}
 	waitLogin := func(panel *Panel, password string) *panelSession {
 		t.Helper()
@@ -166,11 +181,9 @@ func TestPinnedPanelBackupRestore(t *testing.T) {
 	if _, err := docker("restart", panelID); err != nil {
 		t.Fatal("cannot restart the isolated panel after private bootstrap")
 	}
-	panel, err := NewPanel(strings.TrimSuffix(initialPanel.base, "/bootstrap-panel") + "/integration-panel")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(panel.transport.CloseIdleConnections)
+	// Docker may allocate a new ephemeral host port after restart. Rediscover
+	// the mapping rather than treating the old endpoint as a readiness failure.
+	panel := panelEndpoint(panelID, "/integration-panel")
 	session := waitLogin(panel, secret)
 	if err := bootstrap.verify(ctx, panel); err != nil {
 		t.Fatal("isolated panel bootstrap failed post-restart verification")
@@ -242,20 +255,21 @@ func TestPinnedPanelBackupRestore(t *testing.T) {
 	if _, err := docker("image", "inspect", traefikImage); err != nil {
 		t.Fatal("pull the pinned Traefik image explicitly before running integration tests")
 	}
-	ipBytes, err := docker("inspect", "--format", `{{.NetworkSettings.IPAddress}}`, panelID)
-	if err != nil {
+	ipBytes, err := docker("inspect", "--format", `{{json .NetworkSettings.Networks}}`, panelID)
+	var networks map[string]struct{ IPAddress string }
+	if err != nil || json.Unmarshal(ipBytes, &networks) != nil {
 		t.Fatal("cannot discover isolated panel network address")
 	}
-	ip := strings.TrimSpace(string(ipBytes))
+	ip := networks["bridge"].IPAddress
 	if net.ParseIP(ip) == nil {
 		t.Fatal("isolated panel has no bridge address")
 	}
 	routes := t.TempDir()
 	routesConfig := `{"http":{"routers":{"panel":{"entryPoints":["management"],"rule":"PathPrefix(\u0060/integration-panel/\u0060)","service":"panel"}},"services":{"panel":{"loadBalancer":{"servers":[{"url":"http://` + ip + `:2053"}]}}}}}`
-	if err := os.WriteFile(filepath.Join(routes, "routes.json"), []byte(routesConfig), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(routes, "routes.yml"), []byte(routesConfig), 0644); err != nil {
 		t.Fatal("cannot prepare isolated Traefik routing")
 	}
-	traefikID := create(traefikImage, []string{"--publish", "127.0.0.1::8443/tcp", "--mount", "type=bind,src=" + routes + ",dst=/test-routes,readonly"}, "--entrypoints.management.address=:8443", "--providers.file.filename=/test-routes/routes.json", "--log.level=ERROR")
+	traefikID := create(traefikImage, []string{"--publish", "127.0.0.1::8443/tcp", "--mount", "type=bind,src=" + routes + ",dst=/test-routes,readonly"}, "--entrypoints.management.address=:8443", "--providers.file.filename=/test-routes/routes.yml", "--log.level=ERROR")
 	if _, err := docker("start", traefikID); err != nil {
 		t.Fatal("cannot start isolated Traefik")
 	}

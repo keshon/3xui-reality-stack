@@ -1,5 +1,5 @@
-// Command stack-manager is the experimental remote CLI. It has no
-// stack adapters; the same controller client will serve the future manager TUI.
+// Command stack-manager is the experimental remote CLI and fullscreen TUI.
+// It uses the controller client over SSH and imports no stack adapters.
 package main
 
 import (
@@ -15,8 +15,13 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	ctx, cancel := context.WithTimeout(ctx, 45*time.Second)
-	defer cancel()
+	// Interactive sessions outlive a single request. Handshake and TUI requests
+	// have their own budgets; batch commands keep the original total deadline.
+	if len(os.Args) < 2 || os.Args[1] != "tui" {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 45*time.Second)
+		defer cancel()
+	}
 	if err := runWithInput(ctx, os.Args[1:], os.Stdin, os.Stdout, sshclient.Connect); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

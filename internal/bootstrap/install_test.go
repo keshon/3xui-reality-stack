@@ -218,6 +218,26 @@ func TestBootstrapChecksBinaryVersionAfterItsChecksum(t *testing.T) {
 	}
 }
 
+func TestBootstrapRefusesIncompleteInstalledManifest(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		i := newInstallation(t)
+		if out, err := i.run(t); err != nil {
+			t.Fatalf("bootstrap: %s", out)
+		}
+		manifest := filepath.Join(i.prefix, "v0.1.0-go.1", "SHA256SUMS")
+		if missing {
+			if err := os.Remove(manifest); err != nil {
+				t.Fatal(err)
+			}
+		} else if err := os.WriteFile(manifest, []byte("changed manifest\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if out, err := i.run(t); err == nil {
+			t.Fatalf("incomplete installed release accepted: %s", out)
+		}
+	}
+}
+
 func TestBootstrapSelectsArm64Asset(t *testing.T) {
 	i := newInstallation(t)
 	i.env = append(i.env, "BOOTSTRAP_ARCH=aarch64")

@@ -157,7 +157,14 @@ func (w *installRuntime) observeWeb(ctx context.Context, snapshot installRuntime
 }
 
 func (w *installRuntime) observeInstallServices(ctx context.Context, snapshot installRuntimeSnapshot, intent webIntent, dir string, panel *panelIntent) (map[string]webContainer, error) {
-	_, inputs, err := readInstallDraftPhase(w.root, true, true, panel != nil)
+	return w.observeRuntimeServices(ctx, snapshot, intent, dir, panel, nil)
+}
+
+func (w *installRuntime) observeRuntimeServices(ctx context.Context, snapshot installRuntimeSnapshot, intent webIntent, dir string, panel *panelIntent, promotion *promotionIntent) (map[string]webContainer, error) {
+	if promotion != nil && panel == nil {
+		return nil, errors.New("promotion requires the original panel identity")
+	}
+	_, inputs, err := readInstallDraftCommit(w.root, true, true, panel != nil, w.commitBaseline)
 	if err != nil || !reflect.DeepEqual(inputs, snapshot.Binding.Inputs) {
 		return nil, errors.New("frozen installation inputs changed during web startup")
 	}
@@ -196,6 +203,14 @@ func (w *installRuntime) observeInstallServices(ctx context.Context, snapshot in
 			found[row.Name], ids[row.ID] = current, true
 			continue
 		}
+		if promotion != nil && row.Name == "3x-ui" {
+			current, err := w.inspectPublishedPanel(ctx, snapshot, *panel, networkID, row.ID)
+			if err != nil {
+				return nil, err
+			}
+			found[row.Name], ids[row.ID] = current, true
+			continue
+		}
 		if row.Name != "traefik" && row.Name != "decoy" {
 			return nil, errors.New("unexpected containers appeared during web startup")
 		}
@@ -219,6 +234,21 @@ func (w *installRuntime) observeInstallServices(ctx context.Context, snapshot in
 			}
 		}
 	}
+	if promotion != nil {
+		bootstrap := found[panelContainerName(snapshot.Owner)]
+		if bootstrap.ID != promotion.Before.ID || bootstrap.ImageID != promotion.Before.ImageID || bootstrap.StartedAt != promotion.Before.StartedAt || bootstrap.Running && identityOfPanel(bootstrap) != promotion.Before {
+			return nil, errors.New("promotion bootstrap identity changed")
+		}
+		if bootstrap.Running && found["3x-ui"].ID != "" {
+			return nil, errors.New("bootstrap and published panels may not share an open database")
+		}
+		var saved webIdentity
+		exists, err := readJSON(filepath.Join(dir, "panel-published.json"), &saved, true)
+		current := found["3x-ui"]
+		if err != nil || exists && (saved.ID != current.ID || saved.ImageID != current.ImageID || saved.StartedAt != current.StartedAt || !current.Running) {
+			return nil, errors.New("recorded published panel was replaced, restarted, stopped or removed")
+		}
+	}
 	if network.Containers != len(network.Endpoints) {
 		return nil, errors.New("incomplete web network endpoint inventory")
 	}
@@ -236,7 +266,7 @@ func (w *installRuntime) observeInstallServices(ctx context.Context, snapshot in
 		return nil, errors.New("web startup host prerequisites or resources changed")
 	}
 	for _, check := range observed.Checks {
-		allowed := check.ID == "existing-networks" || check.ID == "existing-containers" && len(found) > 0 || (check.ID == "port-tcp-80" || check.ID == "port-tcp-2053") && found["traefik"].Running
+		allowed := check.ID == "existing-networks" || check.ID == "existing-containers" && len(found) > 0 || (check.ID == "port-tcp-80" || check.ID == "port-tcp-2053") && found["traefik"].Running || promotion != nil && (check.ID == "port-tcp-443" || check.ID == "port-udp-443") && found["3x-ui"].Running
 		if !check.OK && !allowed {
 			return nil, errors.New("web startup host resource conflict")
 		}
@@ -347,7 +377,7 @@ func (w *installRuntime) startWeb(ctx context.Context, dir string, snapshot inst
 	}
 	ready := w.webReady
 	if ready == nil {
-		ready = verifyWebCertificates
+		ready = waitWebCertificates
 	}
 	if err := ready(ctx, w.root, snapshot.Binding.Inputs); err != nil {
 		return err

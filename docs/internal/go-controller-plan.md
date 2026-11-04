@@ -1,6 +1,6 @@
 # Go deployment controller plan
 
-Status: implementation started on `codex/go-deployment-engine`. The Python
+Status: feature freeze on `codex/go-deployment-engine`. The Python
 controller remains the operational entrypoint. The Go CLI reads local managed
 metadata, checks runtime compatibility, saves bound reviews and reports operation
 status. Its password editor updates desired configuration through the shared lock,
@@ -9,16 +9,41 @@ controller API over SSH stdio. The
 execution/confirmation/recovery path is exercised through the simulated site
 adapter and the simulated panel. Default 3x-ui composition remains read-only;
 `--experimental-password-writes` explicitly selects its narrow password adapter
-for the eventual German-server rehearsal. Live/container validation is pending.
-Implementation continues locally before that rehearsal. Nothing has been deployed.
+for the German-server rehearsal. Existing-host read-only and password-write
+acceptance have passed, alongside isolated pinned-container provisioning tests.
+The private standalone workflow has completed live Linux acceptance on KZ,
+including recovery, Docker restart and host reboot. Rehearsal binaries stay
+separate from the legacy controllers. No release was published.
+
+The current delivery target is a fullscreen TUI for the tested existing-host
+operations, using the same controller locally and over SSH. Fresh standalone
+installation is available through the local CLI with
+`--experimental-install`, separate from password execution and SSH/TUI writes.
+The private standalone workflow covers three core transports, unified users,
+subscriptions and verified transfers.
+Native/JSON profile checks, authenticated-transfer gates, routing verification
+and replayable commit passed real Docker/systemd, route promotion and transfer
+checks on KZ. Existing-host adoption remains a
+separate operation; the fresh installer must not run over the German installation.
+
+For this release, Docker/Compose and domain DNS are operator prerequisites.
+Automatic Docker installation, a fresh-install wizard, routine account editing, general
+adoption and additional adapters are deferred. They are not release blockers.
+The remaining release work is limited to:
+
+1. Publish matching compiled release assets and verify the public bootstrap
+   download before production cutover. The bootstrap currently has no published
+   controller release to download.
+2. Review the TUI experience using mock data before release. Existing-host
+   fullscreen navigation has passed locally and over SSH. Keep deployment rules
+   in the controller.
 
 ## Outcome
 
-A fresh Linux VPS can install the controller with `curl -fsSL <release-url> |
-bash`, complete a short wizard, and deploy a verified stack. Repeating setup
-opens the existing installation. A configuration file supports unattended
-installation through the same operations. Routine changes affect only their
-owned resources, and interrupted changes have an explicit recovery path.
+The first release downloads a compiled controller, accepts a configuration file,
+shows a bound review and deploys one standalone stack through the CLI. Repeating
+the bootstrap preserves an existing installation; interrupted operations resume
+through the existing engine. The existing-host TUI uses that same controller API.
 
 The first supported stack is this repository's 3x-ui deployment. Existing
 account credentials, keys, subscription hosts, paths and IDs survive adoption.
@@ -60,13 +85,14 @@ Current packages:
 
 ```text
 cmd/stackctl-go/       experimental CLI wiring and output
-cmd/stack-manager/     adapter-free remote CLI, ahead of the shared TUI
+cmd/stack-manager/     adapter-free remote CLI and fullscreen TUI
 cmd/stack-release/     local release builder; no publishing or deployment
 internal/deployment/  stack-independent plan vocabulary
                       reviews, status, locking, durable writes and resumable execution
 internal/control/     local controller API, stdio protocol and protocol client
 internal/console/     command output and exact confirmation shared by both CLIs
 internal/sshclient/   OpenSSH process transport, without stack logic
+internal/tui/         shared fullscreen navigation, forms and confirmation screens
 internal/buildinfo/   version metadata injected into release binaries
 internal/release/     cgo-free release builder and checksum manifest
 internal/bootstrap/   tests for the Bash controller binary installer
@@ -75,16 +101,15 @@ internal/xui/         3x-ui state reader, planner, HTTP adapter and password wor
 internal/testkit/     simulated site stack and fault injection, for tests only
 ```
 
-Introduce a TUI package when its milestone needs it. The engine must not import
-an adapter or terminal library. CLI wiring
-selects the adapter; adapters may import engine contracts. Keep future Bubble
-Tea rendering and keyboard state outside deployment logic. Reuse GEKTOR's
+The engine must not import an adapter or terminal library. CLI wiring
+selects the adapter; adapters may import engine contracts. Bubble
+Tea rendering and keyboard state stay outside deployment logic. Reuse GEKTOR's
 structural approach and terminal experience, not its agent/model machinery.
 The experimental executable name avoids replacing the existing `stack` command.
 
 ## Local and remote management
 
-The future TUI uses the controller API in either location. On the VPS it can
+The TUI uses the controller API in either location. On the VPS it can
 call the local controller. On a workstation it uses the protocol client over
 SSH. Stack adapters and saved deployment credentials remain on the VPS; the
 manager binary imports no stack adapter or simulated stack. Future user-entered
@@ -424,7 +449,7 @@ credentials. No secret, account name or secret-derived fingerprint is returned.
 The initializer renders `.stack/config.json`, `.env`, `users.txt`, `nodes.txt`
 and the embedded compatibility policy, plus private initialization metadata.
 It also renders `xui/compose.json`, `traefik/compose.json`, `decoy/compose.json`,
-Traefik's dynamic TLS JSON and the bundled nginx/example-site files. Compose
+Traefik's dynamic TLS file (`tls.yml`, with JSON content) and the bundled nginx/example-site files. Compose
 documents use JSON with literal values and Compose dollar escaping, not shell
 templates or environment-file substitutions. The three projects retain the
 external `proxy` network, Xray's public TCP/UDP 443 ownership, Traefik's internal
@@ -438,12 +463,12 @@ No applied baseline, running deployment, service or certificate is created.
 The Compose drafts deliberately omit the old Python certificate sidecar. The Go
 exporter and its systemd unit renderer are implemented. Runtime directories,
 asset permissions and an empty ACME state are prepared inside the private draft.
-The private runtime workflow implements service installation/activation, but is
-not connected to a public execution adapter. Web startup and certificate
-readiness and isolated panel bootstrap are implemented privately; transport/user
-provisioning, public route activation and final verification must be added before
-install apply is available. The dynamic TLS
-file describes future certificate paths; those certificates do not exist yet.
+The installation workflow implements service installation/activation, certificate
+readiness, isolated panel bootstrap, core transport/user provisioning, route
+promotion, subscription/transfer verification and applied-state commit. Local
+CLI execution requires `--experimental-install` and an exact reviewed approval.
+The dynamic TLS file describes future certificate paths; certificates do not
+exist during initialization.
 The report lists future provisioning stages with `can_apply: false`.
 
 Files are staged privately, synced and published as a complete directory. The
@@ -469,16 +494,36 @@ SSH/root/controller options. Input crosses the private channel and remains on
 the controller host. Initialization cannot select a root in its RPC request.
 Default `read_only` capability still means application effects are unavailable;
 reviews and initialization can write private controller/configuration metadata.
-Ordinary `plan` remains blocked on a draft until fresh-install execution exists;
-this is not an adoption request or a working deployed stack.
+Default `plan` remains blocked on an unapplied draft. Local
+`plan --experimental-install` checks the draft, host and installed release before
+showing installation effects. A draft is not a working deployed stack.
 
 #### Fresh-install review
 
 `review` recognizes an unapplied Go draft and creates an `xui-install-v1` preview
-through the existing local/SSH controller and review engine. It still returns
-`can_apply: false`; no installation execution adapter is registered. The optional
-password adapter refuses this review, so enabling password writes cannot enable
-installation. Saving a review creates private review metadata, not an operation.
+through the existing review engine. Default local/SSH reviews return
+`can_apply: false`. Local `--experimental-install` selects the installation-only
+adapter and returns an applicable review after all checks pass. It cannot be
+combined with password writes or used with `serve`/`tui`; the SSH manager and TUI
+continue to expose existing-host operations only. The password adapter refuses
+installation reviews. Saving a review creates private metadata, not an operation.
+
+```bash
+stackctl-go preflight --root /opt/new-stack
+stackctl-go plan --root /opt/new-stack --experimental-install
+stackctl-go review --root /opt/new-stack --experimental-install
+stackctl-go apply --root /opt/new-stack --experimental-install --confirm REVIEW_ID
+# After an interruption, inspect the journal and use its exact operation ID:
+stackctl-go operation --root /opt/new-stack
+stackctl-go resume --root /opt/new-stack --experimental-install --operation OPERATION_ID
+```
+
+Replace `REVIEW_ID` and `OPERATION_ID` with the returned identifiers. Reviews
+expire after 15 minutes; recovery reopens the original binding even after expiry.
+Repeated approval returns the existing operation rather than starting another.
+`cancel-preparation` is available only before effects; it does not undo an
+installation or remove resources. Initialization reports `can_apply: false`
+because it creates a draft; the bound review determines execution eligibility.
 
 The shared draft reader checks bounded regular files, initialization hashes,
 directory types/permissions, absent applied state and idle operation journals.
@@ -491,8 +536,8 @@ facts, the controller's physical path/version/SHA256 and the exact exporter unit
 Public output contains effects and review identifiers, without credentials,
 domains, file contents, paths or binary fingerprints. Existing containers,
 networks, volumes, occupied ports or unavailable prerequisites block review.
-Docker/Compose must already be available for this preview; automatic Docker
-installation remains unfinished.
+Docker/Compose must already be available; automatic runtime installation is
+outside the first release.
 
 The controller must be a release build with an adjacent `SHA256SUMS` entry
 matching its bytes. A Linux controller also compares those bytes with its own
@@ -512,19 +557,21 @@ activation. The Linux CI systemd checks include an unused random service query.
 Tests simulate fresh Linux hosts locally and exercise review bindings, release
 changes, blocked services, unavailable managers, populated database directories,
 input races, checksum mismatch/duplicates and the password/installation boundary.
-The preview makes no runtime changes. The private workflow described below begins
-to execute the frozen review through the same operation engine. Web bootstrap and
-certificate readiness and isolated panel bootstrap are implemented; transport/user
-provisioning, public route activation, subscription/transfer verification and
-applied-state commit remain unfinished.
+Review makes no runtime changes. The installation workflow described below
+executes the frozen review through the same operation engine. Web bootstrap and
+certificate readiness, isolated panel bootstrap and core transport/user
+provisioning, route promotion and native subscription checks are implemented.
+JSON subscriptions, authenticated-transfer gates, routing verification and
+applied-state commit are checked before installation completes.
 
 #### Install runtime stages and recovery
 
 An unexported `installRuntime` workflow now freezes the review in the operation's
-`installation.json` and uses the shared engine's checkpoints. It is not registered
-as a production execution adapter: the CLI and SSH API continue to report
-`can_apply: false`. Local tests supply simulated Docker and systemd boundaries;
-no live host is changed by the tests.
+`installation.json` and uses the shared engine's checkpoints. `InstallStack` opens
+only `xui-install-v1` bindings and is selected by the local CLI opt-in. Default
+and SSH adapters continue to report `can_apply: false` for installation. Local
+tests supply simulated Docker and systemd boundaries; live acceptance requires
+the separate integration opt-in.
 
 Preparation writes private recovery artifacts only. The first executable stage
 validates all three Compose documents with an explicit, frozen empty environment
@@ -554,11 +601,13 @@ inputs, replacement network IDs and changed controller binaries. Service tests
 also cover publication/reload interruption and modified bytes before activation.
 
 The `services` stage bootstraps web services and the `panel` stage initializes an
-isolated panel as described below. The remaining `verify` and `commit` stages
-deliberately stop with execution unavailable. Transport/user provisioning and
-promotion to the final public deployment must precede final verification.
-Their identifiers stay stable for future recovery. The partial workflow cannot
-mark an install complete or create an applied baseline. Runtime stages still
+isolated panel as described below. The `panel` stage also provisions the core
+transports and unified users. The `verify` stage promotes the configured panel
+and checks native/JSON subscriptions, routing and authenticated transfers.
+`commit` repeats those gates and publishes the frozen applied record. Its replay
+accepts only that exact record, without changing its timestamp or credentials.
+Ordinary initialization still refuses every applied root. Stage identifiers
+remain stable for recovery. Runtime stages still
 need real Linux Docker/systemd acceptance before controlled deployment; only
 simulated host boundaries have run locally.
 
@@ -625,8 +674,8 @@ database and its regular, bounded sidecar files are accepted. Ordinary draft
 inspection retains its empty-database requirement. Selected Docker inspection
 checks image, operation labels, entrypoint, mounts, network and listener layout
 without reading container environment values. Unrelated containers remain a
-conflict. The panel stays isolated after bootstrap; promotion to the final public
-deployment is still pending.
+conflict. The panel stays isolated through bootstrap and provisioning; the later
+promotion stage performs the handoff to the final deployment.
 
 The helper tries the desired credentials first. Only an explicit authentication
 rejection allows a fallback to the pinned upstream's fresh `admin/admin` account.
@@ -657,14 +706,97 @@ API and verifies the changed path after restart. The pinned backup/restore test
 also exercises API bootstrap. These Docker tests have not run on this workstation;
 public installation execution remains disabled.
 
-The next provisioning slice should create one native unified client per person
-and attach it to all three core inbounds through the pinned clients API. The
-legacy per-lane clone/consolidation sequence is unnecessary for a fresh database.
-Credentials and Reality keys must be frozen before the first API write, and
-recovery must match existing rows against that intent instead of regenerating
-identities or repairing unrelated rows. Reality's `traefik:8443` fallback becomes
-reachable only after the configured panel is promoted onto the proxy network;
-bootstrap readiness alone does not prove working transports.
+#### Core transport and unified account provisioning
+
+After bootstrap, the private `panel` stage provisions Reality/Vision on 443/TCP,
+Trojan HTTPUpgrade on 12812 behind Traefik and native Hysteria2 on 443/UDP. No
+public listeners or routes are enabled during this stage. One native unified
+client per person is attached to all three inbounds; the legacy per-lane clone
+and consolidation sequence is omitted.
+
+Before the first API write, `provisioning.json` freezes the configuration hash,
+Reality X25519 private key and short ID, and each account's UUID, Trojan password,
+Hysteria auth and subscription ID. The Reality public key is derived in Go using
+the standard library. The private state file records server-assigned inbound IDs,
+completed accounts and pending writes. Initial provisioning requires an empty
+panel catalog; an existing panel without this intent is never adopted.
+
+Each API write rechecks the frozen deployment files, controller/helper and
+isolated container identity. Read-back matches configuration, credentials and
+attachments against the original intent. Lost replies and checkpoints reuse
+confirmed rows without rotating identities. A partially attached, matching client
+can finish its links through the native attach API. Missing or changed completed
+resources, foreign rows and altered credentials stop provisioning. An ambiguous
+create with no visible matching row stays pending and requires inspection; it is
+not automatically repeated because inbound creation has no idempotency key.
+
+Local tests exercise lost replies/read-back interruptions, partial attachment
+recovery, exact identity preservation, unmanaged rows, replacement IDs, changed
+credentials/configuration and loss of container isolation between API writes.
+The opt-in pinned Docker test now also provisions/replays the three core lanes
+and unified users with a temporary test certificate. It has not run locally.
+These checks cover stored configuration. The promoted subscription checks below
+verify published output separately; real transfer execution needs Linux acceptance.
+
+Reality's `traefik:8443` fallback becomes reachable only after the configured
+panel is promoted onto the proxy network. Core health is checked before and after
+promotion; regional routing policy is verified before commit. Bootstrap/provisioning readiness
+alone does not prove working transports; public installation apply remains off.
+
+#### Promotion and native subscription verification
+
+Promotion requires completed provisioning, an unchanged bootstrap container and
+a running core. It captures a SQLite backup and canonical client/settings view
+in private operation files, then freezes their hashes, the original bootstrap
+identity and an image/ownership Compose override in `promotion-intent.json`.
+Recovery validates those exact artifacts; it does not refresh the backup after
+starting lifecycle effects.
+
+The workflow stops the bootstrap by immutable ID before starting the final
+`3x-ui` service on the proxy network with the same database and pinned image.
+Only the reviewed TCP/UDP 443 ports and Traefik routes are permitted. Inspection
+checks mounts, network, owner labels, command, restart policy and published ports;
+foreign routes and privileged containers are rejected. The stopped bootstrap
+container is retained for recovery, and two running panels sharing the database
+are rejected. No automatic restore or rollback is attempted.
+
+The final container ID, image and start timestamp are recorded before readiness
+checks. A lost stop/start reply or delayed routing readiness resumes from those
+resources instead of recreating them. Verified HTTPS authentication through local
+Traefik, a running core and an unchanged client/settings snapshot are required
+after the handoff. TLS uses the panel hostname and system certificate trust while
+dialing loopback directly, without public DNS or an HTTP proxy.
+
+Every provisioned account's native subscription is then read through the public
+subscription hostname on local Traefik. The reader has no administrator cookies
+and refuses redirects. Its bounded base64 response must contain exactly Reality,
+Trojan HTTPUpgrade and Hysteria2 with the frozen credentials, public address and
+port, correct Reality key/short ID/flow, HTTPUpgrade path and no TLS verification
+bypass. Container and frozen-file ownership are checked around requests.
+
+Local tests cover lifecycle interruptions, pending TLS routing, core failures,
+identity changes, altered snapshots/routes/mounts/ports, subscription drift and
+TLS/redirect handling. The opt-in pinned Docker test also checks the actual native
+subscriptions on its private bridge; it has not run locally. Real promotion and
+Traefik routing still need Linux acceptance. JSON subscriptions must contain all
+three expected outbounds with matching credentials/endpoints, no enabled Mux or
+TLS verification bypass, and the default proxy routing. Every account is checked.
+The generated server routing must retain the pinned private-address/BitTorrent
+protections without regional deny rules.
+
+The transfer gate reuses Xray and curl inside the owned, immutable panel container.
+A private stdin configuration opens SOCKS on container loopback only. One
+existing account transfers at least 64 KiB over HTTPS through each transport;
+no probe account, host runtime dependency or permanent service is added. Temporary
+configuration and the probe core are cleaned up on success/failure. This observes
+connectivity from the VPS, not reachability from a user's ISP.
+
+Only after all gates pass may `commit` publish `.stack/applied.json` using the
+legacy-compatible configuration/output-hash schema. A lost commit checkpoint
+reuses its frozen target and rechecks services/profiles/transfers; foreign applied
+state or changed resources stop recovery. Simulated engine tests cover completion,
+failed gates and interruption after publication. The shell lifecycle is exercised
+with local process fixtures. These are not substitutes for actual Linux transfers.
 
 #### Certificate export
 
@@ -763,25 +895,13 @@ installing or starting a service. It has not run locally on Windows.
 No release assets have been published. The bootstrap download URL is therefore
 an implementation contract, not a working public installation command. A checksum
 from the same release detects corruption; it does not authenticate a compromised
-publisher. Stack provisioning, existing-host adoption, interactive launch and the
-fresh-install wizard remain unimplemented; binary bootstrap is not a replacement
-for those operations. The remaining installation work is:
-
-- Publish reviewed release artifacts only after the Linux rehearsal; the local
-  builder itself never uploads assets or creates releases.
-- Add interactive launch when the TUI exists. It must open `/dev/tty` when stdin
-  belongs to the download pipe; unattended invocation must not require a terminal.
-- Extend the implemented preflight with installation-specific version/capacity
-  requirements and revalidate reviewed resource ownership before provisioning.
-- Collect essential domain/certificate/admin settings; show the concrete plan.
-  Support HTTP-01 and existing DNS-01 configuration without assuming a DNS API.
-- Prepare Docker only if needed, validate the rendered Compose files, obtain certificates, create
-  empty lanes and unified users directly, and verify real authenticated transfers.
-- Make host firewall changes explicit in the plan; do not enable UFW as a side
-  effect of changing an application port. Provider firewalls and DNS remain
-  explicit prerequisites unless the operator configures an integration.
-- Resume installation and ensure a second run creates no new credentials,
-  duplicate accounts or unnecessary restarts. No Python dependency on this path.
+publisher. Standalone provisioning is available through the local CLI opt-in; existing-host adoption,
+interactive launch and the wizard are deferred. The first-release boundary and
+remaining acceptance work are listed at the top of this document. The local
+builder never uploads assets or creates releases. DNS, Docker and provider
+firewalls remain explicit operator prerequisites. A future interactive launcher
+must open `/dev/tty` when stdin belongs to the download pipe; unattended
+invocation must not require a terminal.
 
 Acceptance: disposable supported Ubuntu/Debian hosts pass install, rerun and
 interrupted-install tests. Both architectures compile; runtime tests must state
@@ -839,8 +959,9 @@ After the local implementation is ready, the rollout sequence is:
 The existing-host tests do not validate installation from scratch. Fresh install,
 bootstrap reruns and intentional crash/recovery scenarios require a disposable
 Linux VM or separate VPS. Container API tests complement that environment but
-cannot establish host provisioning, firewall or reboot behavior. Deployment to
-Germany remains deferred until the implementation is ready for review.
+cannot establish host provisioning, firewall or reboot behavior.
+Germany's service-changing rollout remains deferred until the implementation is
+ready for review.
 
 ### First German-server password rehearsal
 
@@ -868,8 +989,141 @@ Prepare this workflow before transferring or running a binary on the server:
    failure, inspect status and use explicit resume with its exact operation ID;
    do not rerun the legacy installer or restore a database blindly.
 
-The flag is a temporary experimental access path for a controlled rehearsal,
-not a claim that live validation has passed. No rehearsal has started yet.
+The flag is a temporary experimental access path for a controlled rehearsal.
+Both read-only checks and the password round trip below have passed.
+
+### German-server read-only rehearsal: 2026-11-04
+
+Tested Linux amd64 on the existing Ubuntu 24.04 installation with controller
+`v0.0.0-germany.20261104.3`. The controller and a compiled integration test stayed
+in a separate private rehearsal directory. No Go installation, source upgrade,
+Compose apply, password change or container restart was performed.
+
+- Consistent SQLite and configuration/source backups were taken under the shared
+  lock. The snapshot passed `PRAGMA integrity_check`; off-server copies matched
+  the archive SHA-256 hashes. Access details and private artifacts remain outside
+  this repository. The existing [restore procedure](../maintenance.md#state-backups)
+  remains the recovery reference; no restore was exercised on the live database.
+- Go inspection passed, the plan reported `unchanged`, runtime checks reported
+  `compatible`, and operation status remained `idle`. The Windows manager also
+  reached the controller through real SSH stdio.
+- Native and JSON subscriptions were retrieved for all nine panel accounts.
+  Management and fallback HTTPS passed certificate verification. Existing
+  authenticated probes transferred 96,940 bytes with HTTP 200 through each of
+  Reality, Trojan HTTPUpgrade and Hysteria2. This was from the VPS; MTProto,
+  AmneziaWG and reachability from user ISPs were not tested.
+- `TestLivePanelReadOnly` exercised Go authentication, canonical preservation
+  reads and database export through the real management endpoint. It passed
+  after two local fixes: preserving a legitimately absent `nodes.txt`, and
+  canonicalizing Docker mount/port ordering without hiding resource changes.
+- Final comparisons confirmed unchanged managed files, container identities,
+  start times/restart counts, all client identities and panel settings.
+
+The opt-in test is compiled locally with `go test -c -tags integration` for
+Linux amd64, then run on the VPS with only this test selected:
+
+```bash
+STACK_TEST_LIVE_ROOT=/opt/xray-stack ./xui-live.test \
+  -test.run '^TestLivePanelReadOnly$' -test.v -test.timeout 90s
+```
+
+It acquires the shared lock and performs authenticated reads only. No deployment
+or password adapter is executed. Default test runs skip it unless the live root
+is explicitly supplied. Local regression/race tests, vet and release builds
+passed after the fixes. A complete fresh installation still requires disposable Linux.
+
+### German-server password and container acceptance: 2026-11-04
+
+Controller `v0.0.0-germany.20261104.5` completed a reviewed password rotation
+through the native CLI and restored the original password through the Windows
+SSH manager. Both operations completed all three steps. Completed-operation
+resume was idempotent; replaying a consumed review was rejected before effects.
+
+Verified off-server backups preceded the writes. Both operation database exports
+passed SQLite integrity checks. All nine accounts retained their identities,
+attachments and native/JSON subscriptions. Authenticated transfers through
+Reality, Trojan HTTPUpgrade and Hysteria2 succeeded during rotation and after
+restoration. All six existing containers retained their identities, start times
+and restart counts. Noncredential inputs were unchanged; generated password
+quoting and applied-state metadata were rewritten as expected.
+
+Isolated `TestPinnedPanelIsolation` and `TestRenderedComposeConfig` passed on
+Germany using separate temporary containers and private databases. They exposed
+and verified fixes for null empty catalogs, object-valued inbound settings and
+the panel's metrics files. Temporary containers were removed. The separate
+backup/restore container test was not run because the host lacks `sqlite3`.
+Full host provisioning, reboot recovery and reachability from user ISPs remain
+outside this acceptance. The operational controller was not replaced.
+
+### KZ fresh-install acceptance: 2026-11-04
+
+The private workflow passed on Ubuntu 26.04 amd64 with Docker 29.9.1 and Compose
+5.6.0. The existing VPN's source, consistent database and Docker identities were
+backed up first. Tests used a separate Docker data directory and installation
+root, preserving the original Docker records. The original containers were
+stopped during acceptance. This tests an empty Docker environment on an existing
+Linux host; Docker installation and distribution provisioning remain prerequisites.
+
+- Pinned panel provisioning, database backup/restore and real Compose loading
+  passed, including the HTTP and DNS render variants.
+- A clean HTTP-01 installation obtained trusted certificates, configured three
+  core transports and a synthetic unified account, and committed managed state.
+  Native/JSON subscriptions, regional routing policy and authenticated transfers
+  through Reality, Trojan HTTPUpgrade and Hysteria2 passed.
+- A separate loopback-only DNS-01 smoke test issued a real wildcard/base-domain
+  certificate through the existing DNS provider, exported it with Go and verified
+  trusted TLS for both configured hostnames. The temporary issuer was removed.
+- Separate processes recovered deliberate stops after web-service effects and
+  applied-state publication. Commit replay preserved the exact baseline.
+- The same container/image IDs, credentials, subscriptions and settings survived
+  Docker restart and host reboot. Routing and all three authenticated transfers
+  were checked again afterward.
+- Native CLI inspection/planning/runtime and read-only fullscreen navigation,
+  mouse scrolling and refresh passed against the new installation.
+
+Acceptance exposed fixes for Traefik's required `.yml` dynamic-config extension,
+asynchronous certificate/listener/router readiness and runtime inspection of
+immutable image references. The latter checks both the pinned tag's local image
+ID and repository digest. Docker fixture fixes rediscover ephemeral ports after
+restart and read addresses from per-network metadata.
+
+`TestLiveFreshInstallation` is opt-in under the `integration` build tag. It needs
+`STACK_TEST_FRESH_INSTALL=1`, an initialized `STACK_TEST_FRESH_ROOT`, a protected
+release binary at `STACK_TEST_CONTROLLER`, and `STACK_TEST_FRESH_PHASE` set to
+`start`, `commit`, `finish` or `running`. The test executable owns the private
+workflow; the checksum-verified release supplies the real certificate helper.
+It retains recovery artifacts and never weakens inventory or ownership checks.
+This run preceded public CLI installation wiring. User ISP/client reachability
+is outside this acceptance.
+
+After acceptance, all five original containers were restored with their original
+image IDs, configuration and boot enablement. Source/configuration hashes and
+client, administrator and settings rows matched the saved baseline; database
+integrity and the public HTTPS endpoint passed. The temporary Docker service was
+removed. Original and acceptance backups were copied off-server and their
+checksums and SQLite snapshots verified. No release assets were published.
+
+### Local CLI installation acceptance: 2026-11-04
+
+The checksum-verified controller completed a new HTTP-01 installation on KZ
+through its public `initialize`, `preflight`, `plan`, `review` and `apply`
+commands. The installation adapter was selected with `--experimental-install`;
+no test executable drove the workflow. Apply completed in approximately 94
+seconds. Repeated approval returned the same operation, completed-operation
+resume succeeded, runtime was compatible and the ordinary managed plan was
+unchanged. The workflow verified native/JSON subscriptions, routing and all three
+authenticated transfers before publishing its baseline.
+
+The local installation adapter accepts only installation bindings. Default
+composition, SSH and TUI installation remain unavailable; password execution is
+a separate opt-in. Command and adapter tests cover option separation, exact
+confirmation, stale drafts, workflow-kind rejection and recovery using a new
+controller instance. Full Go race tests with integration-tag fixtures and vet
+passed. An independent running-installation check passed after CLI completion.
+All five legacy containers were then restored with unchanged configuration hashes
+and client, administrator and settings rows; database integrity, original boot
+enablement and public HTTPS passed. The temporary Docker service was removed;
+its isolated rehearsal records remain on disk. No release was published.
 
 ## Development commands
 
@@ -900,9 +1154,8 @@ policy and example decoy assets are embedded in the controller binary. The futur
 cannot download that version until its matching assets are explicitly published.
 
 `review` writes private controller metadata. Default 3x-ui composition reports
-`can_apply: false`; saving that review does not enable its write path. Once the
-implementation is ready for the controlled existing-host rehearsal, the explicit
-local commands are:
+`can_apply: false`; saving that review does not enable its write path. To use
+the tested narrow password adapter, the explicit local commands are:
 
 ```bash
 read -r -s -p 'New panel password: ' stack_password
@@ -916,14 +1169,15 @@ stackctl-go resume --root /opt/xray-stack --experimental-password-writes --opera
 ```
 
 Replace identifiers with values returned by the controller. These commands are
-preparation instructions; they have not been run against Germany.
+examples of the workflow rehearsed against Germany.
 The password command consumes stdin through EOF and does not hide terminal input
 itself. The Bash example uses `read -s` to avoid echoing the password, and passes
 it through a pipe rather than a process argument or command history literal.
 
 The remote CLI is experimental and requires a separately installed controller
-binary on the target. No target has received it yet. After an approved deployment,
-an existing verified SSH alias can be used as follows:
+binary on the target. Germany has received an isolated rehearsal copy; the
+operational controller remains unchanged. An existing verified SSH alias and the
+chosen controller path can be used as follows:
 
 ```bash
 go run ./cmd/stack-manager plan --ssh test-vps --root /opt/xray-stack --controller /opt/stack/bin/stackctl-go
@@ -932,8 +1186,8 @@ go run ./cmd/stack-manager plan --ssh test-vps --root /opt/xray-stack --controll
 The manager starts that binary with `serve --stdio`; it never installs or updates
 it. Local `serve` requires the explicit `--stdio` flag and reserves stdout for
 protocol frames. The SSH process transport is tested with a local child process;
-the tests do not establish an SSH connection to a live host. The manager CLI
-uses a 45-second connection/request budget. The TUI is not implemented yet.
+unit tests do not establish an SSH connection to a live host; the separate
+German rehearsal does. Batch commands use a 45-second connection/request budget.
 For a password rehearsal through SSH, add `--experimental-password-writes` to the
 manager's configure-password/review/apply/resume command; it starts the remote stdio controller with
 that same option. Remote metadata and credentials remain on the controller host.
@@ -942,7 +1196,66 @@ Go tests can run the real Python lock and dotenv parser for interoperability.
 Set `STACK_TEST_PYTHON` to a Python interpreter path when it is not discoverable
 as `python3` or `python`. Those checks skip if Python is absent; it is a test
 dependency only. Production controller binaries remain cgo-free and use no
-third-party Go dependencies in this milestone.
+Python at runtime. The terminal frontends use Bubble Tea, Bubbles and Lip Gloss;
+deployment and protocol packages remain independent of terminal libraries.
+
+### Fullscreen TUI
+
+```bash
+stackctl-go tui --root /opt/xray-stack
+stack-manager tui --ssh test-vps --root /opt/xray-stack --controller /opt/stack/bin/stackctl-go
+```
+
+Both commands require an interactive terminal. The framed workspace has a main
+menu, navigation pane, connection/status lines and function-key bar. At widths
+below 76 columns, navigation uses the Overview screen instead of a side pane.
+Tab switches panes; arrows and Enter choose a task. F9 opens Workspace, Actions
+and Session menus. F1 shows help, F2 opens Overview, F3 Status, F4 Plan, F5
+refreshes, F6 opens Password, F7 reviews the plan, F8 opens Operation and F10
+exits. Unavailable actions are dimmed. Escape returns, `r` refreshes and `q`
+exits outside input dialogs. Long reports scroll. The SSH handshake and individual requests have
+timeouts; the interactive session has no fixed lifetime and does not reconnect
+automatically.
+
+Menus, navigation, function-key cells, contextual actions and dialog controls
+also accept left clicks. The wheel scrolls the report under the pointer;
+dialogs capture mouse input. Report overflow shows a scroll percentage. Windows
+input uses the same native/VT compatibility approach as GEKTOR, restoring console
+mode on exit. Synthetic ConEmu packet tests and a PTY mouse/paste smoke check
+pass; testing in a physical ConEmu window remains operator verification.
+
+Sessions are read-only by default. `--experimental-password-writes` adds a masked
+password modal and the accepted adapter capabilities. Tab cycles its fields and
+Save/Cancel buttons. Confirmation dialogs have an explicit action and Back
+button; Escape closes them. Saving the password form updates
+desired configuration only. From Plan, `v` creates a bound review; `a` opens a
+separate confirmation before Apply. Operation offers explicit resume or
+preparation cancellation when eligible. Closing a session during a write requires
+checking its saved operation before retrying. Fresh installation is unavailable.
+
+Terminal smoke checks passed on Windows over SSH and directly on Germany through
+an SSH terminal: fullscreen entry/exit, Home, Status, Plan and Operation navigation,
+and live refresh. The remote session also refreshed after more than 45 seconds.
+These UI checks were read-only. Model tests cover masked input, canceled forms,
+review expiry, separate apply/recovery confirmation and bounded screen sizes.
+
+For interactive development without a server, run the same screens with synthetic
+in-memory data:
+
+```bash
+go run ./cmd/stack-preview
+go run ./cmd/stack-preview --scenario blocked
+go run ./cmd/stack-preview --scenario interrupted
+```
+
+The healthy default starts with an unchanged plan; open Change panel password
+to exercise form, review, confirmation and completion using any dummy password.
+The interrupted scenario starts before effects so Operation can demonstrate
+either resume (`s`) or cancellation (`c`). The blocked scenario shows a runtime
+compatibility failure and omits write actions. Restart to reset all mock state.
+The preview has no SSH, Docker or file persistence and is excluded from release
+assets. It checks the UI experience; it does not validate provisioning or recovery
+on a real host.
 
 On a disposable Linux host with a local Docker daemon and `sqlite3`, explicitly
 pull the pinned image and opt into the container test:
@@ -962,7 +1275,7 @@ synthetic managed metadata and restore checks use test credentials; no deployed
 configuration is required. Container runs require both pinned images already
 present locally and `sqlite3` on the host.
 
-Commands emit JSON. `plan`, `runtime` and `preflight` exit unsuccessfully when blocked.
+Batch commands emit JSON. `plan`, `runtime` and `preflight` exit unsuccessfully when blocked.
 The `version` command emits a single version string instead of JSON.
 `plan` reports proposed actions without executing them. An unchanged result refers to the local
 baseline only, not live service health. Missing managed state is reported rather

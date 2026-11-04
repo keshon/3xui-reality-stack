@@ -23,6 +23,35 @@ type panelDockerFixture struct {
 	configuration             config
 }
 
+// Bootstrap tests stop before transport provisioning; the full panel stage also
+// exercises the unified clients/inbounds API covered by provisioning tests.
+type panelBootstrapBoundary struct {
+	*installRuntime
+	interrupt bool
+}
+
+func (w panelBootstrapBoundary) Steps(ctx context.Context, dir string) ([]deployment.Step, error) {
+	steps, err := w.installRuntime.Steps(ctx, dir)
+	snapshot, openErr := w.open(dir)
+	if openErr != nil {
+		return nil, openErr
+	}
+	for i := range steps {
+		if steps[i].ID == "panel" {
+			steps[i].Run = func(ctx context.Context) error {
+				if err := w.startPanel(ctx, dir, snapshot); err != nil {
+					return err
+				}
+				if w.interrupt {
+					return errors.New("effect succeeded before checkpoint")
+				}
+				return nil
+			}
+		}
+	}
+	return steps, err
+}
+
 func (f *panelDockerFixture) run(ctx context.Context, args ...string) ([]byte, error) {
 	if args[0] == "image" && strings.Contains(args[2], "3x-ui") {
 		return json.Marshal(map[string]any{"id": "sha256:" + strings.Repeat("8", 64), "digests": []string{"ghcr.io/mhsanaei/3x-ui@sha256:" + strings.Repeat("7", 64)}})
@@ -144,15 +173,12 @@ func TestPanelStartupRecoversLifecycleInterruptions(t *testing.T) {
 				}
 			}
 			engine := deployment.Engine{Root: w.root}
-			var workflow deployment.Workflow = w
-			if point == "checkpoint" {
-				workflow = &runtimeFailure{installRuntime: w, after: "panel"}
-			}
+			var workflow deployment.Workflow = panelBootstrapBoundary{w, point == "checkpoint"}
 			if err := engine.Start(t.Context(), workflow); err == nil {
 				t.Fatal("unfinished installation claimed success")
 			}
 			resumed := &installRuntime{root: w.root, stack: w.stack, helper: helper, webReady: w.webReady, panelEndpoint: w.panelEndpoint}
-			if err := engine.Resume(t.Context(), resumed); err == nil || !strings.Contains(err.Error(), "verify") {
+			if err := engine.Resume(t.Context(), panelBootstrapBoundary{resumed, false}); err == nil || !strings.Contains(err.Error(), "verify") {
 				t.Fatalf("panel recovery did not reach final-verification boundary: %v", err)
 			}
 			if docker.creates != 1 || docker.starts != 1 || docker.restarts != 1 || *docker.credentials != 1 || *docker.settings != 1 || docker.webDockerFixture.starts != 2 {
@@ -173,7 +199,7 @@ func TestPanelRecoveryRejectsResourceAndDatabaseDrift(t *testing.T) {
 		t.Run(fault, func(t *testing.T) {
 			w, docker, helper := panelWorkflowFixture(t)
 			engine := deployment.Engine{Root: w.root}
-			if err := engine.Start(t.Context(), &runtimeFailure{installRuntime: w, after: "panel"}); err == nil {
+			if err := engine.Start(t.Context(), panelBootstrapBoundary{w, true}); err == nil {
 				t.Fatal("expected interrupted checkpoint")
 			}
 			switch fault {
@@ -245,5 +271,23 @@ func TestPanelBootstrapRejectsDatabaseBeforeFirstStart(t *testing.T) {
 	}
 	if docker.starts != 0 || *docker.credentials != 0 || *docker.settings != 0 {
 		t.Fatal("foreign database triggered startup or credential writes")
+	}
+}
+
+func TestBootstrapDatabaseAllowsPinnedMetricsButRejectsForeignFiles(t *testing.T) {
+	dir := t.TempDir()
+	for _, name := range []string{"x-ui.db", "x-ui.db-wal", "system_metrics.gob", "system_metrics.gob.tmp"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("test"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := validateBootstrapDatabase(dir); err != nil {
+		t.Fatal("pinned panel metrics blocked bootstrap")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "foreign.db"), []byte("test"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateBootstrapDatabase(dir); err == nil {
+		t.Fatal("metrics exception admitted a foreign database")
 	}
 }

@@ -27,7 +27,7 @@ func directoryMode(name string) os.FileMode {
 }
 
 func artifactMode(name string) os.FileMode {
-	if name == "decoy/nginx.conf" || name == "traefik/dynamic/tls.json" || strings.HasPrefix(name, "decoy/site/") {
+	if name == "decoy/nginx.conf" || name == "traefik/dynamic/tls.yml" || strings.HasPrefix(name, "decoy/site/") {
 		return 0644
 	}
 	return 0600

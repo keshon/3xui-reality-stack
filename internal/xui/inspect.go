@@ -109,7 +109,7 @@ func inspect(root string, ownPreparation bool) (Inspection, error) {
 	}
 	if !i.Report.Baseline {
 		if _, err := os.Lstat(filepath.Join(state, "go-initialization.json")); err == nil {
-			i.Report.Blockers = append(i.Report.Blockers, "Go initialization draft has no applied baseline; fresh-install execution is not implemented")
+			i.Report.Blockers = append(i.Report.Blockers, "Go initialization draft has no applied baseline; use the local experimental installation workflow")
 		} else {
 			i.Report.Blockers = append(i.Report.Blockers, "no applied baseline; adoption is not implemented")
 		}

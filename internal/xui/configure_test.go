@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +61,30 @@ func TestConfigurePasswordChangesOnlyDesiredState(t *testing.T) {
 	status, err := (deployment.Engine{Root: root}).Status()
 	if err != nil || status.Status != "idle" {
 		t.Fatal("configuration edit registered a deployment operation")
+	}
+}
+
+func TestConfigurePasswordPreservesAbsentNodesFile(t *testing.T) {
+	root := passwordFixtureWithoutNodesFile(t)
+	before, err := readPasswordInputs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := (PasswordStack{}).Configure(t.Context(), root, map[string]string{"PANEL_PASS": "another-private-password"})
+	if err != nil || plan.Status != "proposed" {
+		t.Fatal("standalone password editing requires an unrelated nodes.txt")
+	}
+	after, err := readPasswordInputs(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{".env", ".stack/applied.json", "users.txt", "nodes.txt"} {
+		if !reflect.DeepEqual(before[name], after[name]) {
+			t.Fatal("password editing changed generated or applied inputs")
+		}
+	}
+	if _, err := os.Lstat(filepath.Join(root, "nodes.txt")); !os.IsNotExist(err) {
+		t.Fatal("password editing generated nodes.txt")
 	}
 }
 

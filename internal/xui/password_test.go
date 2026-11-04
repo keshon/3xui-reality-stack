@@ -241,6 +241,100 @@ func TestPasswordChangeAndLostReply(t *testing.T) {
 	}
 }
 
+func passwordFixtureWithoutNodesFile(t *testing.T) string {
+	t.Helper()
+	root := passwordFixture(t)
+	if err := os.Remove(filepath.Join(root, "nodes.txt")); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, ".stack/applied.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var previous map[string]any
+	if json.Unmarshal(data, &previous) != nil {
+		t.Fatal("invalid fixture baseline")
+	}
+	previous["output_hashes"].(map[string]any)["nodes.txt"] = nil
+	if err := deployment.WriteJSON(path, previous); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func TestPasswordChangePreservesAbsentNodesFile(t *testing.T) {
+	root := passwordFixtureWithoutNodesFile(t)
+	fake, panel := newFakePanel(t)
+	fake.dropReply = true
+	w, err := reviewPasswordFixture(t, root, panel)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Exercise the serialized binding as well as the in-memory review.
+	encoded, err := json.Marshal(w.binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := decodePasswordBinding(encoded); err != nil {
+		t.Fatal(err)
+	}
+	if err := (deployment.Engine{Root: root}).Start(t.Context(), w); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "nodes.txt")); !os.IsNotExist(err) {
+		t.Fatal("password operation generated an unrelated node file")
+	}
+	i, err := Inspect(root)
+	if err != nil || i.Plan().Status != "unchanged" {
+		t.Fatal("absent-file baseline was not preserved")
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if fake.updates != 1 {
+		t.Fatal("ambiguous reply repeated the password write")
+	}
+}
+
+func TestPasswordChangeRejectsNodesFileAppearingDuringOperation(t *testing.T) {
+	for _, afterPreparation := range []bool{false, true} {
+		t.Run(fmt.Sprint(afterPreparation), func(t *testing.T) {
+			root := passwordFixtureWithoutNodesFile(t)
+			fake, panel := newFakePanel(t)
+			w, err := reviewPasswordFixture(t, root, panel)
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			if afterPreparation {
+				if err := w.Prepare(t.Context(), dir); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(root, "nodes.txt"), []byte{}, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if afterPreparation {
+				var steps []deployment.Step
+				steps, err = w.Steps(t.Context(), dir)
+				if err == nil {
+					err = steps[0].Run(t.Context())
+				}
+			} else {
+				err = w.Prepare(t.Context(), dir)
+			}
+			if err == nil {
+				t.Fatal("absent and empty node files were treated as identical")
+			}
+			fake.mu.Lock()
+			defer fake.mu.Unlock()
+			if fake.updates != 0 {
+				t.Fatal("file presence drift reached the password write")
+			}
+		})
+	}
+}
+
 func TestPasswordResumeAfterRemoteCommitAndVerificationFailure(t *testing.T) {
 	root := passwordFixture(t)
 	before := files(t, root)

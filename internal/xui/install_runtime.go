@@ -18,16 +18,19 @@ type helperInstaller interface {
 	Ensure(context.Context, string, []byte, string) error
 }
 
-// installRuntime is an unfinished workflow, deliberately absent from every
-// public ExecutionAdapter. Its implemented stages can be exercised through the
-// real engine with simulated Docker/systemd boundaries, without a live VPS.
+// installRuntime executes the standalone installation bound by InstallStack.
 type installRuntime struct {
-	root          string
-	stack         Stack
-	binding       *installBinding
-	helper        helperInstaller
-	webReady      func(context.Context, string, map[string][]byte) error
-	panelEndpoint func(webContainer, string) (*Panel, error)
+	root             string
+	stack            Stack
+	binding          *installBinding
+	helper           helperInstaller
+	webReady         func(context.Context, string, map[string][]byte) error
+	panelEndpoint    func(webContainer, string) (*Panel, error)
+	publishedPanel   func(config) (*Panel, error)
+	subscriptionRead func(context.Context, config, string) ([]byte, error)
+	jsonRead         func(context.Context, config, string) ([]byte, error)
+	transferProbe    func(context.Context, string, string, []byte) error
+	commitBaseline   []byte
 }
 
 type installRuntimeSnapshot struct {
@@ -206,13 +209,16 @@ func (w *installRuntime) Steps(ctx context.Context, dir string) ([]deployment.St
 			return check(ctx, true)
 		}},
 		{ID: "services", Run: func(ctx context.Context) error { return w.startWeb(ctx, dir, snapshot) }},
-		{ID: "panel", Run: func(ctx context.Context) error { return w.startPanel(ctx, dir, snapshot) }},
+		{ID: "panel", Run: func(ctx context.Context) error {
+			if err := w.startPanel(ctx, dir, snapshot); err != nil {
+				return err
+			}
+			return w.provisionPanel(ctx, dir, snapshot)
+		}},
 	}
-	// Keep future stage identifiers stable for recovery. There is no completion
-	// receipt or applied baseline until all of these stages exist and verify.
-	for _, id := range []string{"verify", "commit"} {
-		steps = append(steps, deployment.Step{ID: id, Run: func(context.Context) error { return deployment.ErrExecutionUnavailable }})
-	}
+	steps = append(steps, deployment.Step{ID: "verify", Run: func(ctx context.Context) error {
+		return w.verifyInstallation(ctx, dir, snapshot)
+	}}, deployment.Step{ID: "commit", Run: func(ctx context.Context) error { return w.commitInstallation(ctx, dir, snapshot) }})
 	return steps, ctx.Err()
 }
 

@@ -125,6 +125,11 @@ func (s *panelSession) json(ctx context.Context, path string, body, result any) 
 	if !reply.Success {
 		return errRejected
 	}
+	// The pinned panel serializes an empty catalog as null. Accept it only
+	// for these read-only list endpoints; missing settings/objects still fail.
+	if body == nil && (path == "/panel/api/inbounds/list" || path == "/panel/api/clients/export") && bytes.Equal(reply.Object, []byte("null")) {
+		reply.Object = json.RawMessage("[]")
+	}
 	if result != nil && (len(reply.Object) == 0 || bytes.Equal(reply.Object, []byte("null")) || json.Unmarshal(reply.Object, result) != nil) {
 		return errors.New("invalid panel response object")
 	}

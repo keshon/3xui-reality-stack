@@ -1,10 +1,10 @@
 package xui
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"unicode/utf8"
 
 	"github.com/keshon/3xui-reality-stack/internal/deployment"
@@ -53,7 +53,7 @@ func (s PasswordStack) Configure(ctx context.Context, root string, changes map[s
 		return deployment.Plan{}, err
 	}
 	for _, name := range passwordInputs {
-		if !bytes.Equal(before[name], after[name]) {
+		if !reflect.DeepEqual(before[name], after[name]) {
 			return deployment.Plan{}, errors.New("managed inputs changed during configuration edit")
 		}
 	}

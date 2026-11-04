@@ -32,13 +32,13 @@ type installBinding struct {
 
 func installPlan() deployment.Plan {
 	return deployment.Plan{Stack: stackID, Status: "proposed", ReadOnly: true,
-		Reasons: []string{"installation preview only; fresh-install execution is not implemented"},
+		Reasons: []string{"standalone installation; requires a reviewed, conflict-free host and an installed release controller"},
 		Actions: []deployment.Action{
 			{ID: "snapshot", Resource: "installation-inputs", Effects: []string{"freeze draft, controller release, host prerequisites and helper service ownership"}},
 			{ID: "runtime", Resource: "docker", Effects: []string{"revalidate host conflicts; create the reviewed proxy network and validate generated Compose files"}},
 			{ID: "certificates", Resource: "certificate-export", Effects: []string{"install and enable the reviewed exporter unit; resolve pinned web images to immutable digests; start Traefik and the decoy; obtain and verify certificates"}},
 			{ID: "panel", Resource: "panel", Effects: []string{"start the pinned panel locally; configure administrator access, transports and unified accounts"}},
-			{ID: "verify", Resource: "stack", Effects: []string{"verify subscription contents and authenticated transfers"}},
+			{ID: "verify", Resource: "stack", Effects: []string{"preserve recovery snapshots and promote the configured panel to reviewed public ports and Traefik routes", "verify subscription contents and authenticated transfers"}},
 			{ID: "commit", Resource: "managed-state", Effects: []string{"commit applied state only after service and transfer verification"}},
 		}}
 }
