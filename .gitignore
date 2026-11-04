@@ -33,6 +33,13 @@ __pycache__/
 .stack/
 *.egg-info/
 
+# Go build output
+/bin/
+/stackctl-go
+/stackctl-go.exe
+/stack-manager
+/stack-manager.exe
+
 # editors / os
 *.swp
 *~

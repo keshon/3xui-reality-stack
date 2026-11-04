@@ -77,6 +77,11 @@ failing over between transports is a client responsibility.
 
 ## State and control
 
+The [Go controller](go-controller.md) uses the same runtime traffic paths and
+managed configuration schema. Its reviews, operation journal and certificate
+helper are described in [controller internals](internal/go-controller-plan.md).
+The Python controller retains adoption, fleet management and broader changes.
+
 | State | Owner |
 |---|---|
 | `.stack/config.json` | Desired managed configuration; literal secret values |
@@ -124,8 +129,7 @@ attachment operations. Integration details that matter when extending scripts:
   or `/dev/net/tun`.
 
 The tested runtime boundary is recorded in
-[compatibility.json](../compatibility.json). Historical observations against
-other versions are preserved in [implementation notes](internal/implementation-notes.md).
+[compatibility.json](../compatibility.json).
 
 ## Failure boundaries
 

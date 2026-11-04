@@ -1,7 +1,8 @@
 # Running the stack
 
-This guide covers fresh installs, adoption of running deployments and routine
-configuration changes. The console edits configuration without dotenv or shell escaping.
+This guide covers the Python controller: fresh installs, adoption of running
+deployments and routine configuration changes. For the compiled controller and
+terminal wizard, use [Go controller](go-controller.md). The console edits configuration without dotenv or shell escaping.
 Its UI is English. It runs locally in this checkout; it is not a remote agent
 or a replacement for 3x-ui.
 

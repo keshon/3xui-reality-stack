@@ -1,8 +1,9 @@
 # Conventions
 
-The Python controller owns configuration validation, operation locking and
-progress. Existing deployment scripts own panel and infrastructure actions.
-The console and CLI use the same controller.
+Each console and CLI uses its controller for configuration validation, locking
+and progress. The Python controller delegates application actions to deployment
+scripts; the Go controller uses stack adapters. Keep UI state separate from
+deployment rules.
 
 ## Development
 
@@ -19,6 +20,41 @@ On Windows, use `.venv\Scripts\python.exe -m pip install -e ".[test]"` and
 environment. Tests use temporary deployment roots and fake actions rather than
 configuring the developer's host or contacting a real panel. Read skip output
 when a platform cannot exercise an adapter or filesystem feature.
+
+## Go controller development
+
+The Go controller and Python CLI share managed configuration and locking; their
+supported operations differ. Keep each entrypoint connected to its own controller.
+Its package boundaries and recovery contracts are in
+[Go controller internals](internal/go-controller-plan.md). With the Go version in
+[go.mod](../go.mod), run `go test ./...` and `go vet ./...` from the repository
+root. Format changed Go files with `gofmt`. Build local binaries under `bin/`.
+Continue running the Python suite while both implementations coexist.
+
+**Practice:** follow GEKTOR's root module, `cmd/` entrypoints, responsibility-based
+`internal/` packages and colocated tests. Keep terminal dependencies outside
+deployment logic; prefer the standard library and cgo-free dependencies.
+
+**Enforced — `internal/deployment/lock_test.go`, `tests/test_go_coexistence.py`:**
+Go and Python use the same deployment lock. Python refuses unfinished or unknown
+Go operation markers between invocations. Interoperability tests need a Python
+interpreter; see the internals reference for `STACK_TEST_PYTHON`. Installation
+and password changes use separate execution adapters with explicit review and
+confirmation.
+
+**Enforced — `cmd/stack-manager/application_test.go`:** the manager's production
+dependency graph excludes `internal/xui` and `internal/testkit`. Its read commands
+use the same controller API and rendering as the local CLI. The protocol and
+simulated-stack tests cover framing, rejected mutation/path requests, mismatched
+responses, cancellation and process-exit recovery. They do not replace SSH host
+integration or real-container tests.
+
+**Enforced — `internal/testkit/review_test.go`, `internal/control/operations_test.go`,
+`internal/xui/review_test.go`:** reviews bind private input/runtime observations to
+random, expiring IDs. Execution requires exact confirmation; duplicate delivery
+does not repeat an action. Recovery targets an exact operation ID. The simulated
+adapter exercises execution across reconnects. The 3x-ui installation and
+password adapters accept only their own reviewed workflow kinds.
 
 ## Rule labels
 
@@ -99,10 +135,12 @@ with [pyproject.toml](../pyproject.toml), and tested runtime versions with
 diagnosis; avoid turning a past incident into a universal cause.
 
 Retired document paths currently remain short forwarding pages: source upgrades
-reject source removals. Historical measurements live under `docs/internal/`
-and are explicitly marked historical. Check relative links, fragments and
-command flags after documentation changes. No dedicated documentation CI gate
-is currently configured in this repository.
+reject source removals. Keep maintained contracts in the technical reference;
+use Git history for superseded implementation notes. Check relative links,
+fragments and command flags after documentation changes. Wizard SVG examples
+are generated from the real UI and checked by `cmd/stack-preview` tests. Run
+`go run ./cmd/stack-preview --render-docs docs/assets/wizard` after changing those
+screens. Relative documentation links need a separate check.
 
 The reusable [documentation pattern](../.agents/skills/docs-pattern/SKILL.md)
 is versioned in this repository. Apply it when restructuring docs or adding a
