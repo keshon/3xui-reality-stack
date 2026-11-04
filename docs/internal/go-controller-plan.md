@@ -1,6 +1,6 @@
 # Go deployment controller plan
 
-Status: feature freeze on `codex/go-deployment-engine`. The Python
+Status: `v0.1.0-go.1` prerelease published from `codex/go-deployment-engine`. The Python
 controller remains the operational entrypoint. The Go CLI reads local managed
 metadata, checks runtime compatibility, saves bound reviews and reports operation
 status. Its password editor updates desired configuration through the shared lock,
@@ -13,7 +13,8 @@ for the German-server rehearsal. Existing-host read-only and password-write
 acceptance have passed, alongside isolated pinned-container provisioning tests.
 The private standalone workflow has completed live Linux acceptance on KZ,
 including recovery, Docker restart and host reboot. Rehearsal binaries stay
-separate from the legacy controllers. No release was published.
+separate from the legacy controllers. Public bootstrap installation and rerun
+have passed on KZ with the published release.
 
 The current delivery target is a fullscreen TUI for the tested existing-host
 operations, using the same controller locally and over SSH. Fresh standalone
@@ -29,14 +30,12 @@ separate operation; the fresh installer must not run over the German installatio
 For this release, Docker/Compose and domain DNS are operator prerequisites.
 Automatic Docker installation, a fresh-install wizard, routine account editing, general
 adoption and additional adapters are deferred. They are not release blockers.
-The remaining release work is limited to:
-
-1. Publish matching compiled release assets and verify the public bootstrap
-   download before production cutover. The bootstrap currently has no published
-   controller release to download.
-2. Review the TUI experience using mock data before release. Existing-host
-   fullscreen navigation has passed locally and over SSH. Keep deployment rules
-   in the controller.
+The first prerelease is published with all five compiled assets and checksums.
+Public bootstrap installation and rerun passed on KZ without affecting the legacy
+VPN. Mock TUI review and existing-host fullscreen navigation passed locally and
+over SSH; physical ConEmu verification remains operator follow-up. Linux arm64
+is compiled but has not received live runtime acceptance. Production adoption
+remains outside this prerelease.
 
 ## Outcome
 
@@ -892,8 +891,9 @@ installing or starting a service. It has not run locally on Windows.
 
 #### Publishing and remaining installation work
 
-No release assets have been published. The bootstrap download URL is therefore
-an implementation contract, not a working public installation command. A checksum
+[`controller-v0.1.0-go.1`](https://github.com/keshon/3xui-reality-stack/releases/tag/controller-v0.1.0-go.1)
+is published with five binaries and `SHA256SUMS`. The public bootstrap download
+path has passed installation and rerun on KZ Linux amd64. A checksum
 from the same release detects corruption; it does not authenticate a compromised
 publisher. Standalone provisioning is available through the local CLI opt-in; existing-host adoption,
 interactive launch and the wizard are deferred. The first-release boundary and
@@ -911,7 +911,12 @@ also passed the unmodified bootstrap on KZ with a local asset transport fixture:
 installation, checksum/version verification and rerun with read-only inspection.
 The original five containers and source/configuration hashes were unchanged;
 public HTTPS remained available. This fixture does not validate GitHub release
-downloads. Publication and the public download check remain pending.
+downloads. A subsequent run downloaded the script from the published tag and
+fetched the actual release assets over public GitHub HTTPS, with no transport
+fixture. Clean controller installation and rerun with inspection passed; binary
+and installed-manifest hashes matched the published release. All five original
+containers/configurations remained unchanged and running, source/configuration
+hashes matched the baseline, and the original public HTTPS endpoint returned 200.
 
 Acceptance: disposable supported Ubuntu/Debian hosts pass install, rerun and
 interrupted-install tests. Both architectures compile; runtime tests must state
