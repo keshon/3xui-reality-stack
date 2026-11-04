@@ -903,6 +903,16 @@ firewalls remain explicit operator prerequisites. A future interactive launcher
 must open `/dev/tty` when stdin belongs to the download pipe; unattended
 invocation must not require a terminal.
 
+The `v0.1.0-go.1` candidate now has all five compiled assets, a checksum manifest
+and operator instructions in [Go controller](../go-controller.md). GitHub Linux
+CI passed for `a139bfa`, including interoperability, systemd checks, release
+builds and pinned-container provisioning/backup/restore. The final amd64 binary
+also passed the unmodified bootstrap on KZ with a local asset transport fixture:
+installation, checksum/version verification and rerun with read-only inspection.
+The original five containers and source/configuration hashes were unchanged;
+public HTTPS remained available. This fixture does not validate GitHub release
+downloads. Publication and the public download check remain pending.
+
 Acceptance: disposable supported Ubuntu/Debian hosts pass install, rerun and
 interrupted-install tests. Both architectures compile; runtime tests must state
 which architectures were actually exercised. No public curl command is advertised

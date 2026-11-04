@@ -1,5 +1,8 @@
 # Go controller prerelease
 
+Release candidate prepared; publication is pending. The versioned download URLs
+below become available after the tag and assets are published.
+
 `v0.1.0-go.1` provides compiled Linux controllers and a Linux/Windows SSH manager.
 Neither Go nor Python is needed on the target. The existing Python console
 remains the default for installations that need adoption, optional transports,
